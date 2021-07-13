@@ -18,7 +18,7 @@ namespace ReturnHome.Utilities
         {
             _meassgeCreator = new();
         }
-
+        /*
         public ReadOnlyMemory<byte> CompressUnreliable(byte[] MyUnreliable, Session MySession)
         {
             int length = MyUnreliable.Length;
@@ -118,7 +118,7 @@ namespace ReturnHome.Utilities
             //Return ReadOnlyMemory Message
             return _meassgeCreator.MessageReader();
         }
-
+        */
         //Pass in Unreliable message and expected unreliable length
         public unsafe ReadOnlyMemory<byte> Run_length_decode(ReadOnlySpan<byte> arg1, ref int offset, int length)
         {

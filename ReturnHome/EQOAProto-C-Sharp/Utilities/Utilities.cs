@@ -140,12 +140,14 @@ namespace ReturnHome.Utilities
             return NewValue;
         }
 
-        public static int Untechnique(ReadOnlySpan<byte> MyPacket, ref int offset)
+        public static int Untechnique(ReadOnlyMemory<byte> temp, int offset)
         {
+            ReadOnlySpan<byte> MyPacket = temp.Span;
             bool isNegative = false;
 
             //Check if value is negative, is so add 1 to first byte and check bool
-            if ((MyPacket[offset] & 1) == 1) isNegative = true; 
+            if ((MyPacket[offset] & 1) == 1)
+                isNegative = true; 
 
             //Work some magic
             uint val = 0;
@@ -168,20 +170,23 @@ namespace ReturnHome.Utilities
             }
 
             //If value is supposed to be negative, add 1
-            if (isNegative) val += 1;
+            if (isNegative)
+                val += 1;
 
             //Divide the unsigned value by 2 and cast to an integer
             int newVal = (int)(val / 2);
 
             //If its supposed to be negative, make it so
-            if (isNegative) { newVal *= -1; }
+            if (isNegative)
+                newVal *= -1;
 
             return newVal;
         }
 
         //This method unpacks VLI data
-        static public uint Unpack(ReadOnlySpan<byte> ClientPacket, ref int offset)
+        static public uint Unpack(ReadOnlyMemory<byte> temp, ref int offset)
         {
+            ReadOnlySpan<byte> ClientPacket = temp.Span;
             uint val = 0;
 
             //Loop over our packet
