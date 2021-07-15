@@ -23,8 +23,8 @@ namespace ReturnHome.Server.Network
         private readonly NetworkBundle[] currentBundles = new NetworkBundle[(int)GameMessageGroup.QueueMax];
 
         private ConcurrentDictionary<uint, ClientPacket> outOfOrderPackets = new ConcurrentDictionary<uint, ClientPacket>();
-        //private ConcurrentDictionary<uint, MessageBuffer> partialFragments = new ConcurrentDictionary<uint, MessageBuffer>();
-        private ConcurrentDictionary<uint, ClientMessage> outOfOrderFragments = new ConcurrentDictionary<uint, ClientMessage>();
+        //private ConcurrentDictionary<uint, MessageBuffer> partialFragments = new ConcurrentDictionary<uint, MessageBuffer>(); // May not be needed... Don't think client sends us split messages
+        private ConcurrentDictionary<uint, ClientMessage> outOfOrderMessages = new ConcurrentDictionary<uint, ClientMessage>();
 
         private DateTime nextSend = DateTime.UtcNow;
 
@@ -226,6 +226,7 @@ namespace ReturnHome.Server.Network
         /// <param name="packet">The ClientPacket to process.</param>
         public void ProcessPacket(ClientPacket packet)
         {
+			//Develop a way to see if session has been removed/disconnected
             //if (isReleased) // Session has been removed
                 //return;
 
@@ -255,6 +256,12 @@ namespace ReturnHome.Server.Network
 
             // Check if this packet's sequence is greater then the next one we should be getting.
             // If true we must store it to replay once we have caught up.
+			/*
+			CONSIDERATION: We may not want to store packets based on bundle # and tracking that way. 
+			Bundle #'s appear disposable, as a new packet that is the exact same as a prior one, will have the next sequence #.
+			May be better to store data like messages for review later if the sequence is out of order.
+			*/
+			
             var desiredSeq = lastReceivedPacketSequence + 1;
             if (packet.Header.ClientBundleNumber > desiredSeq)
             {
@@ -353,11 +360,19 @@ namespace ReturnHome.Server.Network
             }*/
 
             // Received an rudp report, flush out old packet up to ack
-            if (packet.Header.HasBundleFlag(PacketHeaderFlags.NewProcessReport) || packet.Header.HasBundleFlag(PacketHeaderFlags.ProcessMessageAndReport) ||
-                packet.Header.HasBundleFlag(PacketHeaderFlags.ProcessReport) || packet.Header.HasBundleFlag(PacketHeaderFlags.ProcessAll))
-                //AcknowledgeSequence(packet.HeaderOptional.AckSequence); //Revisit this eventually, need to incorporate Packets/messages being saved based on message #
+			/* 
+			CONSIDERATION: We will not store packets, rather messages. 
+			Upon receiving a client ack, we will filter through and remove messages to ack
+			*/
+			
+            if (packet.Header.HasBundleFlag(PacketBundleFlags.NewProcessReport) || packet.Header.HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||
+                packet.Header.HasBundleFlag(PacketBundleFlags.ProcessReport) || packet.Header.HasBundleFlag(PacketBundleFlags.ProcessAll))
+            {
 
-			/* Don't think we really need this
+            }
+            //AcknowledgeSequence(packet.HeaderOptional.AckSequence); //Revisit this eventually, need to incorporate Packets/messages being saved based on message #
+
+            /* Don't think we really need this
             if (packet.Header.HasFlag(PacketHeaderFlags.TimeSync))
             {
                 //packetLog.DebugFormat("[{0}] Incoming TimeSync TS: {1}", session.LoggingIdentifier, packet.HeaderOptional.TimeSynch);
@@ -372,8 +387,9 @@ namespace ReturnHome.Server.Network
             // This is the start of a three-way handshake between the client and server (LoginRequest, ConnectRequest, ConnectResponse)
             // Note this would be sent to each server a client would connect too (Login and each world).
             // In our current implimenation we handle all roles in this one server.
-            if (packet.Header.HasHeaderFlag(PacketHeaderFlags.NewInstance))
+            if (false)  // if (packet.Header.HasHeaderFlag(PacketHeaderFlags.NewInstance))
             {
+                //Need to trigger session ack here
                 //packetLog.Debug($"[{session.LoggingIdentifier}] LoginRequest");
                 //AuthenticationHandler.HandleLoginRequest(packet, session); //Revisit this, authentication/verification of sent data needs to happen
                 return;
@@ -437,18 +453,19 @@ namespace ReturnHome.Server.Network
             message = new ClientMessage(packetMessage.Data);
 
             // If message is not null, we have a complete message to handle
+			// when would it be null...?
             if (message != null)
             {
-                // First check if this message is the next sequence, if it is not, add it to our outOfOrderFragments
+                // First check if this message is the next sequence, if it is not, add it to our outOfOrderMessages
                 if (packetMessage.Header.MessageNumber == lastReceivedMessageSequence + 1)
                 {
                     //packetLog.DebugFormat("[{0}] Handling fragment {1}", session.LoggingIdentifier, fragment.Header.Sequence);
-                    HandleFragment(message);
+                    HandleMessages(message);
                 }
                 else
                 {
                     //packetLog.DebugFormat("[{0}] Fragment {1} is early, lastReceivedFragmentSequence = {2}", session.LoggingIdentifier, fragment.Header.Sequence, lastReceivedFragmentSequence);
-                    outOfOrderFragments.TryAdd(packetMessage.Header.MessageNumber, message);
+                    outOfOrderMessages.TryAdd(packetMessage.Header.MessageNumber, message);
                 }
             }
         }
@@ -457,10 +474,10 @@ namespace ReturnHome.Server.Network
         /// Handles a ClientMessage by calling using InboundMessageManager
         /// </summary>
         /// <param name="message">ClientMessage to process</param>
-        private void HandleFragment(ClientMessage message)
+        private void HandleMessages(ClientMessage message)
         {
             Console.WriteLine("Here");
-            //InboundMessageManager.HandleClientMessage(message, session);
+            InboundMessageManager.HandleClientMessage(message, session);
             lastReceivedMessageSequence++;
         }
 

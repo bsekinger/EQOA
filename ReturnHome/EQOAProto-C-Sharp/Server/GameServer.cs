@@ -5,6 +5,7 @@ using System;
 using ReturnHome.PacketProcessing;
 using ReturnHome.Server.Network.Managers;
 using ReturnHome.Server.Network;
+using System.Net;
 
 namespace ReturnHome.Server
 {
@@ -16,6 +17,9 @@ namespace ReturnHome.Server
     {
         public static void Main(string[] args)
         {
+			//log.Info("Initializing InboundMessageManager...");
+            InboundMessageManager.Initialize();
+			
 			//Start SocketManager
 			//SocketManager.Initialize();
 
@@ -29,8 +33,12 @@ namespace ReturnHome.Server
             var packet = new ClientPacket();
 
             if (packet.Unpack(buffer.AsMemory(), buffer.Length))
+            {
+                IPEndPoint clientEndPoint = new IPEndPoint(IPAddress.Any, 10070);
+                ServerListener stuff = new ServerListener(clientEndPoint.Address, (uint)clientEndPoint.Port);
                 Console.WriteLine("Clear...");
-                //NetworkManager.ProcessPacket(this, packet, ipEndpoint);
+                NetworkManager.ProcessPacket(stuff, packet, clientEndPoint);
+            }
         }
     }
 }

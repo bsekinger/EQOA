@@ -29,11 +29,11 @@ namespace ReturnHome.Server.Network.Managers
         {
             Session session;
             //ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.ProcessPacket_0);
-            if (packet.Header.HasBundleFlag(PacketHeaderFlags.NewInstance))
+            if (packet.Header.HasHeaderFlag(PacketHeaderFlags.NewInstance))
             {
                 //packetLog.Debug($"{packet}, {endPoint}");
                 //hardcoded for now
-                if (GetAuthenticatedSessionCount() >= 2000)
+                if (GetAuthenticatedSessionCount() > 2000)
                 {
                     //log.InfoFormat("Login Request from {0} rejected. Server full.", endPoint);
                     //Just let packet drop, no way to "reject" afaik
@@ -61,7 +61,8 @@ namespace ReturnHome.Server.Network.Managers
 					}
                 }
             }
-
+			
+			//Packet did not declare new instance request, so see if it exists
             else
             {
 				//Find session, if it returns true, outputs session

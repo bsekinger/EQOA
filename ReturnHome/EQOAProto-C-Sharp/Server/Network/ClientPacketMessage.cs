@@ -4,9 +4,9 @@ namespace ReturnHome.Server.Network
 {
     public class ClientPacketMessage : PacketMessage
     {
-        public bool Unpack(ReadOnlyMemory<byte> buffer, int offset)
+        public bool Unpack(ReadOnlyMemory<byte> buffer, ref int offset)
         {
-            Header.Unpack(buffer, offset);
+            Header.Unpack(buffer, ref offset);
 
 			if (buffer.Length < (offset + Header.Size))
 				return false;

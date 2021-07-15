@@ -12,7 +12,7 @@ namespace ReturnHome.Server.Network.Managers
         private class MessageHandlerInfo
         {
             public MessageHandler Handler { get; set; }
-            //public GameMessageAttribute Attribute { get; set; }
+            public GameMessageAttribute Attribute { get; set; }
         }
 
         private class ActionHandlerInfo
@@ -27,8 +27,8 @@ namespace ReturnHome.Server.Network.Managers
 
         private static Dictionary<GameMessageOpcode, MessageHandlerInfo> messageHandlers;
 
-        //private static Dictionary<GameActionType, ActionHandlerInfo> actionHandlers;
-        /*
+        private static Dictionary<GameActionType, ActionHandlerInfo> actionHandlers;
+        
         public static void Initialize()
         {
             DefineMessageHandlers();
@@ -59,6 +59,7 @@ namespace ReturnHome.Server.Network.Managers
 
         private static void DefineActionHandlers()
         {
+            /*
             actionHandlers = new Dictionary<GameActionType, ActionHandlerInfo>();
 
             foreach (var type in Assembly.GetExecutingAssembly().GetTypes())
@@ -77,12 +78,13 @@ namespace ReturnHome.Server.Network.Managers
                     }
                 }
             }
+            */
         }
 
         public static void HandleClientMessage(ClientMessage message, Session session)
         {
             var opcode = (GameMessageOpcode)message.Opcode;
-
+            /*
             if (messageHandlers.TryGetValue(opcode, out var messageHandlerInfo))
             {
                 if (messageHandlerInfo.Attribute.State == session.State)
@@ -110,6 +112,7 @@ namespace ReturnHome.Server.Network.Managers
             {
                 log.Warn($"Received unhandled fragment opcode: 0x{(int)opcode:X4} - {opcode}");
             }
+            */
         }
 
         /// <summary>
@@ -119,6 +122,7 @@ namespace ReturnHome.Server.Network.Managers
         /// </summary>
         public static void HandleGameAction(GameActionType opcode, ClientMessage message, Session session)
         {
+            /*
             if (actionHandlers.TryGetValue(opcode, out var actionHandlerInfo))
             {
                 // It's possible that before this work is executed by WorldManager, and after it was enqueued here, the session.Player was set to null
@@ -140,7 +144,7 @@ namespace ReturnHome.Server.Network.Managers
             {
                 log.Warn($"Received unhandled GameActionType: 0x{(int)opcode:X4} - {opcode}");
             }
+            */
         }
-        */
     }
 }

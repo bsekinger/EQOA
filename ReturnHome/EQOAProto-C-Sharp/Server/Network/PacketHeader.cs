@@ -12,8 +12,8 @@ namespace ReturnHome.Server.Network
         public ushort ClientEndPoint { get; set; }
         public ushort TargetEndPoint { get; set; }
         public uint HeaderData { get; set; }
-        public uint headerFlags { get; set; }
-        public PacketHeaderFlags bundleFlags { get; set; }
+        public PacketHeaderFlags headerFlags { get; set; }
+        public PacketBundleFlags bundleFlags { get; set; }
 		public bool AckPacket{ get; set; }
         public bool CRCChecksum { get; set; }
         public ushort BundleSize { get; set; }
@@ -29,7 +29,7 @@ namespace ReturnHome.Server.Network
             TargetEndPoint = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
             HeaderData     = Utility_Funcs.Unpack(buffer, ref offset);
             BundleSize     = (ushort)(HeaderData & 0x7FF);
-            headerFlags    = HeaderData - BundleSize;
+            headerFlags    = (PacketHeaderFlags)(HeaderData - BundleSize);
 
             //Verify packet has instance in header
             if (HasHeaderFlag(PacketHeaderFlags.HasInstance))
@@ -54,20 +54,20 @@ namespace ReturnHome.Server.Network
 				return;
 			
 			//Read Bundle Type
-			bundleFlags    = (PacketHeaderFlags)BinaryPrimitiveWrapper.GetLEByte(buffer, ref offset);
+			bundleFlags = (PacketBundleFlags)BinaryPrimitiveWrapper.GetLEByte(buffer, ref offset);
 			
 			ClientBundleNumber = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
-			if (HasBundleFlag(PacketHeaderFlags.NewProcessReport) || HasBundleFlag(PacketHeaderFlags.ProcessMessageAndReport) || 
-			    HasBundleFlag(PacketHeaderFlags.ProcessReport) || HasBundleFlag(PacketHeaderFlags.ProcessAll))
+			if (HasBundleFlag(PacketBundleFlags.NewProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) || 
+			    HasBundleFlag(PacketBundleFlags.ProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessAll))
 			{
 				ClientBundleAck	 = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
 				ClientMessageAck = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
 			}
         }
 
-        public bool HasHeaderFlag(PacketHeaderFlags headerFlags) { return (headerFlags & headerFlags) != 0; }
+        public bool HasHeaderFlag(PacketHeaderFlags HeaderFlags) { return (HeaderFlags & headerFlags) == HeaderFlags; }
 		
-		public bool HasBundleFlag(PacketHeaderFlags bundleFlags) { return (bundleFlags & bundleFlags) != 0; }
+		public bool HasBundleFlag(PacketBundleFlags BundleFlags) { return (BundleFlags & bundleFlags) == BundleFlags; }
 
     }
 }

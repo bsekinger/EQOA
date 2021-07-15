@@ -6,22 +6,20 @@ namespace ReturnHome.Server.Network
     {
         public static int MaxPacketSize { get; } = 1024;
 
-        //Track memory offset as packet is processed
-        public int offset = 0;
-
         public bool Unpack(ReadOnlyMemory<byte> buffer, int bufferSize)
         {
+            //Track memory offset as packet is processed
+            int offset = 0;
+
             try
             {
-                //Minimum header size... 8
-                //Drop if less then that
-                if (bufferSize < 8)
+                if (bufferSize < Header.HeaderSize)
                     return false;
 
                 Header.Unpack(buffer, ref offset);
 
                 //Subtract offset from buffersize to verify that the actual packet bundle size is not greater
-                if (Header.BundleSize > bufferSize - offset)
+                if (Header.BundleSize > (bufferSize - offset))
                     return false;
 
                 //Need a way to identify an additional bundle from client and to process this
@@ -35,14 +33,9 @@ namespace ReturnHome.Server.Network
 						return false;
 				
 					//If no messages to read, we are done
-					if (!ReadMessages(buffer, bufferSize))
+					if (!ReadMessages(buffer, bufferSize, offset))
 						return false;
 				}
-
-                else
-                {
-                    //Process server transfer here
-                }
 
                 return true;
             }
@@ -55,25 +48,25 @@ namespace ReturnHome.Server.Network
             }
         }
 
-        private bool ReadMessages(ReadOnlyMemory<byte> buffer, int bufferSize)
+        private bool ReadMessages(ReadOnlyMemory<byte> buffer, int bufferSize, int offset)
         {
 			//If messages are present... process
-            if (Header.HasBundleFlag(PacketHeaderFlags.NewProcessMessages) || Header.HasBundleFlag(PacketHeaderFlags.ProcessMessageAndReport) ||
-				Header.HasBundleFlag(PacketHeaderFlags.ProcessMessages) || Header.HasBundleFlag(PacketHeaderFlags.ProcessAll))
+            if (Header.HasBundleFlag(PacketBundleFlags.NewProcessMessages) || Header.HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||
+				Header.HasBundleFlag(PacketBundleFlags.ProcessMessages) || Header.HasBundleFlag(PacketBundleFlags.ProcessAll))
             {
                 while (Header.BundleSize != (offset - Header.HeaderSize))
                 {
                     try
                     {
                         var message = new ClientPacketMessage();
-                        if (!message.Unpack(buffer, offset)) return false;
+                        if (!message.Unpack(buffer, ref offset)) return false;
 
                         Messages.Add(message);
                     }
 					
                     catch (Exception)
                     {
-						// Log this?
+                        Console.WriteLine("Error Splicing Messages from packet");
                         // corrupt packet
                         return false;
                     }
