@@ -1,25 +1,23 @@
 ﻿using System;
 using System.IO;
+using System.Threading.Channels;
 
 namespace ReturnHome.Server.Network
 {
     public class ServerPacket : Packet
     {
-        // TODO: I don't know why this value is 464. The reasoning and math needs to be documented here.
+        // Can still add packet header to this total
         public static int MaxPacketSize { get; } = 1024;
 
         /// <summary>
-        /// Make sure you call InitializeDataWriter() before you use this
+        /// Initializes Channle stuff
         /// </summary>
-        //public BinaryWriter DataWriter { get; private set; }
+        public BinaryWriter DataWriter { get; private set; }
 
-        private uint finalChecksum;
+        public int currentSize;
 
-        /*
-        /// <summary>
-        /// This will initailize DataWriter for use.
-        /// </summary>
-        public void InitializeDataWriter(int initialCapacity = 32) // 32 is the max length I saw in Pack() todo: audit this again
+
+        public ServerPacket(int initialCapacity = 32)
         {
             if (DataWriter == null)
             {
@@ -27,9 +25,7 @@ namespace ReturnHome.Server.Network
                 DataWriter = new BinaryWriter(Data);
             }
         }
-        */
 
-        /*
         public void CreateReadyToSendPacket(byte[] buffer, out int size)
         {
             uint payloadChecksum = 0u;
@@ -52,12 +48,11 @@ namespace ReturnHome.Server.Network
 
             Header.Size = (ushort)(size - PacketHeader.HeaderSize);
 
-            var headerChecksum = Header.CalculateHash32();
             finalChecksum = headerChecksum + payloadChecksum;
             Header.Checksum = headerChecksum + (payloadChecksum ^ issacXor);
             Header.Pack(buffer);
         }
-
+        
         public override string ToString()
         {
             var c = Header.HasFlag(PacketHeaderFlags.EncryptedChecksum) ? $" CRC: {finalChecksum} XOR: {issacXor}" : "";

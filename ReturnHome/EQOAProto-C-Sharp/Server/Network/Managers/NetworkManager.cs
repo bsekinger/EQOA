@@ -5,6 +5,9 @@ using System.Linq;
 
 using ReturnHome.Utilities;
 using ReturnHome.Server.Network;
+using ReturnHome.Server.Entity.Actions;
+using ReturnHome.Server.Network.Enum;
+using System.Threading.Tasks;
 
 namespace ReturnHome.Server.Network.Managers
 {
@@ -23,7 +26,7 @@ namespace ReturnHome.Server.Network.Managers
         /// <summary>
         /// Handles ClientMessages in InboundMessageManager
         /// </summary>
-        //public static readonly ActionQueue InboundMessageQueue = new ActionQueue();
+        public static readonly ActionQueue InboundMessageQueue = new ActionQueue();
 
         public static void ProcessPacket(ServerListener connectionListener, ClientPacket packet, IPEndPoint endPoint)
         {
@@ -47,7 +50,7 @@ namespace ReturnHome.Server.Network.Managers
                     var ipAllowsUnlimited = true;
                     if (ipAllowsUnlimited)
                     {
-                        session = new Session(connectionListener, endPoint, packet.Header.InstanceID, packet.Header.ClientEndPoint, ServerID);
+                        session = new Session(connectionListener, endPoint, packet.Header.SessionID, packet.Header.InstanceID, packet.Header.ClientEndPoint, ServerID, false);
 						
 						//Try to add session to List, if it fails drop the session/packet, or process if it passes
                         if (SessionHash.TryAdd(session))
@@ -113,20 +116,12 @@ namespace ReturnHome.Server.Network.Managers
 
             session.Network.Update();
         }
-        
+        */
         public static int GetSessionCount()
         {
-            sessionLock.EnterReadLock();
-            try
-            {
-                return sessionMap.Count(s => s != null);
-            }
-            finally
-            {
-                sessionLock.ExitReadLock();
-            }
+            return SessionHash.Count;
         }
-        */
+        
 
         public static int GetAuthenticatedSessionCount()
         {
@@ -196,7 +191,7 @@ namespace ReturnHome.Server.Network.Managers
             return false;
         }
 
-        /*
+        
         /// <summary>
         /// Processes all inbound GameAction messages.<para />
         /// Dispatches all outgoing messages.<para />
@@ -211,12 +206,14 @@ namespace ReturnHome.Server.Network.Managers
             {
                 // The session tick outbound processes pending actions and handles outgoing messages
                 //ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.DoSessionWork_TickOutbound);
-                //Parallel.ForEach(sessionMap, ConfigManager.Config.Server.Threading.NetworkManagerParallelOptions, s => s?.TickOutbound());
+                Parallel.ForEach(SessionHash, s => s?.TickOutbound());
                 //ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.DoSessionWork_TickOutbound);
 
+                //Temporarily disable to test
+                /*
                 // Removes sessions in the NetworkTimeout state, including sessions that have reached a timeout limit.
                 //ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.DoSessionWork_RemoveSessions);
-                foreach (var session in sessionMap.Where(k => !Equals(null, k)))
+                foreach (var session in SessionHash.Where(k => !Equals(null, k)))
                 {
                     if (session.PendingTermination != null && session.PendingTermination.TerminationStatus == SessionTerminationPhase.SessionWorkCompleted)
                     {
@@ -226,7 +223,7 @@ namespace ReturnHome.Server.Network.Managers
 
                     sessionCount++;
                 }
-                //ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.DoSessionWork_RemoveSessions);
+                //ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.DoSessionWork_RemoveSessions);*/
             }
             finally
             {
@@ -235,6 +232,15 @@ namespace ReturnHome.Server.Network.Managers
             return sessionCount;
         }
 
+        public static void RemoveSession(Session session)
+        {
+            if (SessionHash.TryRemove(session))
+                Console.WriteLine("Session Successfully removed");
+            else
+                Console.WriteLine("Session not removed???");
+        }
+
+        /*
         public static void DisconnectAllSessionsForShutdown()
         {
             foreach (var session in sessionMap)

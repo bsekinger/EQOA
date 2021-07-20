@@ -1,10 +1,15 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Sockets;
 using System.Text;
 using System.Timers;
+
+using ReturnHome.Server.Network.Enum;
 using ReturnHome.Server.Network.GameMessages;
+using ReturnHome.Server.Network.Handlers;
 //using ReturnHome.Server.Network.Handlers;
 using ReturnHome.Server.Network.Managers;
 
@@ -14,7 +19,7 @@ namespace ReturnHome.Server.Network
     {
         private const int minimumTimeBetweenBundles = 5; // 5ms
         private const int timeBetweenTimeSync = 20000; // 20s
-        private const int timeBetweenAck = 300; // 300ms
+        //private const int timeBetweenAck = 300; // 300ms
 
         private readonly Session session;
         private readonly ServerListener connectionListener;
@@ -22,9 +27,9 @@ namespace ReturnHome.Server.Network
         private readonly Object[] currentBundleLocks = new Object[(int)GameMessageGroup.QueueMax];
         private readonly NetworkBundle[] currentBundles = new NetworkBundle[(int)GameMessageGroup.QueueMax];
 
-        private ConcurrentDictionary<uint, ClientPacket> outOfOrderPackets = new ConcurrentDictionary<uint, ClientPacket>();
+        private ConcurrentDictionary<ushort, ClientPacket> outOfOrderPackets = new ConcurrentDictionary<ushort, ClientPacket>();
         //private ConcurrentDictionary<uint, MessageBuffer> partialFragments = new ConcurrentDictionary<uint, MessageBuffer>(); // May not be needed... Don't think client sends us split messages
-        private ConcurrentDictionary<uint, ClientMessage> outOfOrderMessages = new ConcurrentDictionary<uint, ClientMessage>();
+        private ConcurrentDictionary<ushort, ClientMessage> outOfOrderMessages = new ConcurrentDictionary<ushort, ClientMessage>();
 
         private DateTime nextSend = DateTime.UtcNow;
 
@@ -33,19 +38,21 @@ namespace ReturnHome.Server.Network
         public bool sendResync;
         private DateTime nextResync = DateTime.UtcNow;
 
-        // Ack should be sent after a 300 millisecond delay, so start enabled with the delay.
-        private bool sendAck = true;
-        private DateTime nextAck = DateTime.UtcNow.AddMilliseconds(timeBetweenAck);
+        public readonly SessionConnectionData ConnectionData = new SessionConnectionData();
 
-        private uint lastReceivedPacketSequence = 0;
-        private uint lastReceivedMessageSequence = 0;
+        // Ack should be sent after a 300 millisecond delay, so start enabled with the delay.
+        private bool sendAck = false;
+        //private DateTime nextAck = DateTime.UtcNow.AddMilliseconds(timeBetweenAck);
+
+        private ushort lastReceivedPacketSequence = 0;
+        private ushort lastReceivedMessageSequence = 0;
 
         /// <summary>
         /// This is referenced from many threads:<para />
         /// ConnectionListener.OnDataReceieve()->Session.HandlePacket()->This.HandlePacket(packet), This path can come from any client or other thinkable object.<para />
         /// WorldManager.UpdateWorld()->Session.Update(lastTick)->This.Update(lastTick)
         /// </summary>
-        private readonly ConcurrentDictionary<uint /*seq*/, ServerPacket> cachedPackets = new ConcurrentDictionary<uint /*seq*/, ServerPacket>();
+        private readonly ConcurrentDictionary<ushort /*seq*/, ServerPacket> cachedPackets = new ConcurrentDictionary<ushort /*seq*/, ServerPacket>();
 
         private static readonly TimeSpan cachedPacketPruneInterval = TimeSpan.FromSeconds(5);
         private DateTime lastCachedPacketPruneTime;
@@ -91,7 +98,7 @@ namespace ReturnHome.Server.Network
             }
         }
 
-        /*
+        
         /// <summary>
         /// Enequeues a GameMessage for sending to this client.
         /// This may be called from many threads.
@@ -109,7 +116,6 @@ namespace ReturnHome.Server.Network
                 lock (currentBundleLock)
                 {
                     var currentBundle = currentBundles[(int)grp];
-                    currentBundle.EncryptedChecksum = true;
                     //packetLog.DebugFormat("[{0}] Enqueuing Message {1}", session.LoggingIdentifier, message.Opcode);
                     currentBundle.Enqueue(message);
                 }
@@ -132,7 +138,7 @@ namespace ReturnHome.Server.Network
                 packetQueue.Enqueue(packet);
             }
         }
-
+        
         /// <summary>
         /// Prunes the cachedPackets dictionary
         /// Checks if we should send the current bundle and then flushes all pending packets.
@@ -143,7 +149,7 @@ namespace ReturnHome.Server.Network
                 return;
 
             if (DateTime.UtcNow - lastCachedPacketPruneTime > cachedPacketPruneInterval)
-                PruneCachedPackets();
+                //PruneCachedPackets();
 
             for (int i = 0; i < currentBundles.Length; i++)
             {
@@ -158,20 +164,6 @@ namespace ReturnHome.Server.Network
 
                     if (group == GameMessageGroup.InvalidQueue)
                     {
-                        if (sendResync && !currentBundle.TimeSync && DateTime.UtcNow > nextResync)
-                        {
-                            //packetLog.DebugFormat("[{0}] Setting to send TimeSync packet", session.LoggingIdentifier);
-                            currentBundle.TimeSync = true;
-                            currentBundle.EncryptedChecksum = true;
-                            nextResync = DateTime.UtcNow.AddMilliseconds(timeBetweenTimeSync);
-                        }
-
-                        if (sendAck && !currentBundle.SendAck && DateTime.UtcNow > nextAck)
-                        {
-                            //packetLog.DebugFormat("[{0}] Setting to send ACK packet", session.LoggingIdentifier);
-                            currentBundle.SendAck = true;
-                            nextAck = DateTime.UtcNow.AddMilliseconds(timeBetweenAck);
-                        }
 
                         if (currentBundle.NeedsSending && DateTime.UtcNow >= nextSend)
                         {
@@ -198,14 +190,15 @@ namespace ReturnHome.Server.Network
                 // and all future writes from other threads will go to the new bundle
                 if (bundleToSend != null)
                 {
+                    Console.WriteLine("Sending bundle...");
                     SendBundle(bundleToSend, group);
                     nextSend = DateTime.UtcNow.AddMilliseconds(minimumTimeBetweenBundles);
                 }
             }
 
-            FlushPackets();
+            //FlushPackets();
         }
-
+        /*
         private void PruneCachedPackets()
         {
             lastCachedPacketPruneTime = DateTime.UtcNow;
@@ -227,8 +220,8 @@ namespace ReturnHome.Server.Network
         public void ProcessPacket(ClientPacket packet)
         {
 			//Develop a way to see if session has been removed/disconnected
-            //if (isReleased) // Session has been removed
-                //return;
+            if (isReleased) // Session has been removed
+                return;
 
             //packetLog.DebugFormat("[{0}] Processing packet {1}", session.LoggingIdentifier, packet.Header.Sequence);
             //NetworkStatistics.C2S_Packets_Aggregate_Increment();
@@ -292,9 +285,9 @@ namespace ReturnHome.Server.Network
             #endregion
         }
 
-        /*
+        
         const uint MaxNumNakSeqIds = 115; //464 + header = 484;  (464 - 4) / 4
-
+        /*
         /// <summary>
         /// request retransmission of lost sequences
         /// </summary>
@@ -305,11 +298,7 @@ namespace ReturnHome.Server.Network
             List<uint> needSeq = new List<uint>();
             needSeq.Add(desiredSeq);
             uint bottom = desiredSeq + 1;
-            if (rcvdSeq < bottom || rcvdSeq - bottom > CryptoSystem.MaximumEffortLevel)
-            {
-                session.Terminate(SessionTerminationReason.AbnormalSequenceReceived);
-                return;
-            }
+
             uint seqIdCount = 1;
             for (uint a = bottom; a < rcvdSeq; a++)
             {
@@ -387,11 +376,12 @@ namespace ReturnHome.Server.Network
             // This is the start of a three-way handshake between the client and server (LoginRequest, ConnectRequest, ConnectResponse)
             // Note this would be sent to each server a client would connect too (Login and each world).
             // In our current implimenation we handle all roles in this one server.
-            if (false)  // if (packet.Header.HasHeaderFlag(PacketHeaderFlags.NewInstance))
+            if (packet.Header.HasHeaderFlag(PacketHeaderFlags.NewInstance))
             {
                 //Need to trigger session ack here
                 //packetLog.Debug($"[{session.LoggingIdentifier}] LoginRequest");
-                //AuthenticationHandler.HandleLoginRequest(packet, session); //Revisit this, authentication/verification of sent data needs to happen
+                
+                AuthenticationHandler.HandleLoginRequest(packet, session); //Revisit this, authentication/verification of sent data needs to happen
                 return;
             }
 
@@ -399,6 +389,7 @@ namespace ReturnHome.Server.Network
             foreach (ClientPacketMessage message in packet.Messages)
                 ProcessMessage(message);
 
+            //After done processing messages, set session ack flag
             // Update the last received sequence.
             //if (packet.Header.Sequence != 0 && (packet.Header.Flags != PacketHeaderFlags.AckSequence))
                 //lastReceivedPacketSequence = packet.Header.Sequence;
@@ -487,25 +478,25 @@ namespace ReturnHome.Server.Network
         /// </summary>
         private void CheckOutOfOrderPackets()
         {
-            while (outOfOrderPackets.TryRemove(lastReceivedPacketSequence + 1, out var packet))
+            while (outOfOrderPackets.TryRemove((ushort)(lastReceivedPacketSequence + 1), out var packet))
             {
                 //packetLog.DebugFormat("[{0}] Ready to handle out-of-order packet {1}", session.LoggingIdentifier, packet.Header.Sequence);
                 HandleOrderedPacket(packet);
             }
         }
-        /*
+        
         /// <summary>
         /// Checks if we now have fragments queued out of order which should be handled as the next sequence.
         /// </summary>
         private void CheckOutOfOrderFragments()
         {
-            while (outOfOrderFragments.TryRemove(lastReceivedFragmentSequence + 1, out var message))
+            while (outOfOrderMessages.TryRemove((ushort)(lastReceivedMessageSequence + 1), out var message))
             {
-                packetLog.DebugFormat("[{0}] Ready to handle out of order fragment {1}", session.LoggingIdentifier, lastReceivedFragmentSequence + 1);
-                HandleFragment(message);
+                //packetLog.DebugFormat("[{0}] Ready to handle out of order fragment {1}", session.LoggingIdentifier, lastReceivedMessageSequence + 1);
+                HandleMessages(message);
             }
         }
-
+        /*
         //private List<EchoStamp> EchoStamps = new List<EchoStamp>();
 
         private static int EchoLogInterval = 5;
@@ -631,13 +622,13 @@ namespace ReturnHome.Server.Network
                 log.Error($"Session {session.Network?.ClientId}\\{session.EndPoint} ({session.Account}:{session.Player?.Name}) retransmit requested packet {sequence} not in cache. Cache is empty.");
 
             return false;
-        }
-
+        }*/
+        /*
         private void FlushPackets()
         {
             while (packetQueue.TryDequeue(out var packet))
             {
-                packetLog.DebugFormat("[{0}] Flushing packets, count {1}", session.LoggingIdentifier, packetQueue.Count);
+                //packetLog.DebugFormat("[{0}] Flushing packets, count {1}", session.LoggingIdentifier, packetQueue.Count);
 
                 if (packet.Header.HasFlag(PacketHeaderFlags.EncryptedChecksum) && ConnectionData.PacketSequence.CurrentValue == 0)
                     ConnectionData.PacketSequence = new Sequence.UIntSequence(1);
@@ -659,25 +650,18 @@ namespace ReturnHome.Server.Network
                 SendPacket(packet);
             }
         }
-
+        
         private void SendPacket(ServerPacket packet)
         {
-            packetLog.DebugFormat("[{0}] Sending packet {1}", session.LoggingIdentifier, packet.GetHashCode());
-            NetworkStatistics.S2C_Packets_Aggregate_Increment();
+            //packetLog.DebugFormat("[{0}] Sending packet {1}", session.LoggingIdentifier, packet.GetHashCode());
+            //NetworkStatistics.S2C_Packets_Aggregate_Increment();
 
-            if (packet.Header.HasFlag(PacketHeaderFlags.EncryptedChecksum))
-            {
-                uint issacXor = ConnectionData.IssacServer.Next();
-                packetLog.DebugFormat("[{0}] Setting Issac for packet {1} to {2}", session.LoggingIdentifier, packet.GetHashCode(), issacXor);
-                packet.IssacXor = issacXor;
-            }
-
-            SendPacketRaw(packet);
+            //SendPacketRaw(packet);
         }
-
+        /*
         private void SendPacketRaw(ServerPacket packet)
         {
-            byte[] buffer = ArrayPool<byte>.Shared.Rent((int)(PacketHeader.HeaderSize + (packet.Data?.Length ?? 0) + (packet.Fragments.Count * PacketFragment.MaxFragementSize)));
+            byte[] buffer = ArrayPool<byte>.Shared.Rent((int)(PacketHeader.HeaderSize + (packet.Data?.Length ?? 0) + (packet.Messages.Count * PacketMessage.)));
 
             try
             {
@@ -685,16 +669,16 @@ namespace ReturnHome.Server.Network
 
                 packet.CreateReadyToSendPacket(buffer, out var size);
 
-                packetLog.Debug(packet.ToString());
+                //packetLog.Debug(packet.ToString());
 
-                if (packetLog.IsDebugEnabled)
-                {
-                    var listenerEndpoint = (System.Net.IPEndPoint)socket.LocalEndPoint;
-                    var sb = new StringBuilder();
-                    sb.AppendLine(String.Format("[{5}] Sending Packet (Len: {0}) [{1}:{2}=>{3}:{4}]", size, listenerEndpoint.Address, listenerEndpoint.Port, session.EndPoint.Address, session.EndPoint.Port, session.Network.ClientId));
-                    sb.AppendLine(buffer.BuildPacketString(0, size));
-                    packetLog.Debug(sb.ToString());
-                }
+                //if (packetLog.IsDebugEnabled)
+                //{
+                    //var listenerEndpoint = (System.Net.IPEndPoint)socket.LocalEndPoint;
+                    //var sb = new StringBuilder();
+                    //sb.AppendLine(String.Format("[{5}] Sending Packet (Len: {0}) [{1}:{2}=>{3}:{4}]", size, listenerEndpoint.Address, listenerEndpoint.Port, session.EndPoint.Address, session.EndPoint.Port, session.Network.ClientId));
+                    //sb.AppendLine(buffer.BuildPacketString(0, size));
+                    //packetLog.Debug(sb.ToString());
+                //}
 
                 try
                 {
@@ -710,7 +694,7 @@ namespace ReturnHome.Server.Network
                     var sb = new StringBuilder();
                     sb.AppendLine(ex.ToString());
                     sb.AppendLine(String.Format("[{5}] Sending Packet (Len: {0}) [{1}:{2}=>{3}:{4}]", buffer.Length, listenerEndpoint.Address, listenerEndpoint.Port, session.EndPoint.Address, session.EndPoint.Port, session.Network.ClientId));
-                    log.Error(sb.ToString());
+                    //log.Error(sb.ToString());
 
                     session.Terminate(SessionTerminationReason.SendToSocketException, null, null, ex.Message);
                 }
@@ -719,8 +703,8 @@ namespace ReturnHome.Server.Network
             {
                 ArrayPool<byte>.Shared.Return(buffer, true);
             }
-        }
-
+        }*/
+        
         /// <summary>
         /// This function handles turning a bundle of messages (representing all messages accrued in a timeslice),
         /// into 1 or more packets, combining multiple messages into one packet or spliting large message across
@@ -729,34 +713,28 @@ namespace ReturnHome.Server.Network
         /// <param name="bundle"></param>
         private void SendBundle(NetworkBundle bundle, GameMessageGroup group)
         {
-            packetLog.DebugFormat("[{0}] Sending Bundle", session.LoggingIdentifier);
+            //packetLog.DebugFormat("[{0}] Sending Bundle", session.LoggingIdentifier);
 
             bool writeOptionalHeaders = true;
 
-            List<MessageFragment> fragments = new List<MessageFragment>();
+            List<ServerMessage> fragments = new List<ServerMessage>();
 
             // Pull all messages out and create MessageFragment objects
             while (bundle.HasMoreMessages)
             {
                 var message = bundle.Dequeue();
 
-                var fragment = new MessageFragment(message, ConnectionData.FragmentSequence++);
+                var fragment = new ServerMessage(message, ConnectionData.MessageSequence++);
                 fragments.Add(fragment);
             }
 
-            packetLog.DebugFormat("[{0}] Bundle Fragment Count: {1}", session.LoggingIdentifier, fragments.Count);
+            //packetLog.DebugFormat("[{0}] Bundle Fragment Count: {1}", session.LoggingIdentifier, fragments.Count);
 
             // Loop through while we have fragements
             while (fragments.Count > 0 || writeOptionalHeaders)
             {
                 ServerPacket packet = new ServerPacket();
                 PacketHeader packetHeader = packet.Header;
-
-                if (fragments.Count > 0)
-                    packetHeader.Flags |= PacketHeaderFlags.BlobFragments;
-
-                if (bundle.EncryptedChecksum)
-                    packetHeader.Flags |= PacketHeaderFlags.EncryptedChecksum;
 
                 int availableSpace = ServerPacket.MaxPacketSize;
 
@@ -767,110 +745,59 @@ namespace ReturnHome.Server.Network
                     // If a large message send only this one, filling the whole packet
                     if (firstMessage.DataRemaining >= availableSpace)
                     {
-                        packetLog.DebugFormat("[{0}] Sending large fragment", session.LoggingIdentifier);
-                        ServerPacketFragment spf = firstMessage.GetNextFragment();
-                        packet.Fragments.Add(spf);
+                        //packetLog.DebugFormat("[{0}] Sending large fragment", session.LoggingIdentifier);
+                        ServerPacketMessage spf = firstMessage.GetNextFragment();
+                        packet.Messages.Add(spf);
                         availableSpace -= spf.Length;
                         if (firstMessage.DataRemaining <= 0)
                             fragments.Remove(firstMessage);
                     }
-                    // Otherwise we'll write any optional headers and process any small messages that will fit
-                    else
+                    // Create a list to remove completed messages after iterator
+                    List<ServerMessage> removeList = new List<ServerMessage>();
+
+                    foreach (ServerMessage fragment in fragments)
                     {
-                        if (writeOptionalHeaders)
+                        bool fragmentSkipped = false;
+
+                        // Is this a large fragment and does it have a tail that needs sending?
+                        if (!fragment.TailSent && availableSpace >= fragment.TailSize)
                         {
-                            writeOptionalHeaders = false;
-                            WriteOptionalHeaders(bundle, packet);
-                            if (packet.Data != null)
-                                availableSpace -= (int)packet.Data.Length;
+                            //packetLog.DebugFormat("[{0}] Sending tail fragment", session.LoggingIdentifier);
+                            ServerPacketMessage spf = fragment.GetTailFragment();
+                            packet.Messages.Add(spf);
+                            availableSpace -= spf.Length;
                         }
 
-                        // Create a list to remove completed messages after iterator
-                        List<MessageFragment> removeList = new List<MessageFragment>();
-
-                        foreach (MessageFragment fragment in fragments)
+                        // Otherwise will this message fit in the remaining space?
+                        else if (availableSpace >= fragment.NextSize)
                         {
-                            bool fragmentSkipped = false;
-
-                            // Is this a large fragment and does it have a tail that needs sending?
-                            if (!fragment.TailSent && availableSpace >= fragment.TailSize)
-                            {
-                                packetLog.DebugFormat("[{0}] Sending tail fragment", session.LoggingIdentifier);
-                                ServerPacketFragment spf = fragment.GetTailFragment();
-                                packet.Fragments.Add(spf);
-                                availableSpace -= spf.Length;
-                            }
-                            // Otherwise will this message fit in the remaining space?
-                            else if (availableSpace >= fragment.NextSize)
-                            {
-                                packetLog.DebugFormat("[{0}] Sending small message", session.LoggingIdentifier);
-                                ServerPacketFragment spf = fragment.GetNextFragment();
-                                packet.Fragments.Add(spf);
-                                availableSpace -= spf.Length;
-                            }
-                            else
-                                fragmentSkipped = true;
-
-                            // If message is out of data, set to remove it
-                            if (fragment.DataRemaining <= 0)
-                                removeList.Add(fragment);
-
-                            // UIQueue messages must go out in order. Otherwise, you might see an NPC's tells in an order that doesn't match their defined emotes.
-                            if (fragmentSkipped && group == GameMessageGroup.UIQueue)
-                                break;
+                            //packetLog.DebugFormat("[{0}] Sending small message", session.LoggingIdentifier);
+                            ServerPacketMessage spf = fragment.GetNextFragment();
+                            packet.Messages.Add(spf);
+                            availableSpace -= spf.Length;
                         }
+
+                        else
+                            fragmentSkipped = true;
+
+                        // If message is out of data, set to remove it
+                        if (fragment.DataRemaining <= 0)
+                            removeList.Add(fragment);
+
+                        // UIQueue messages must go out in order. Otherwise, you might see an NPC's tells in an order that doesn't match their defined emotes.
+                        if (fragmentSkipped && group == GameMessageGroup.UIQueue)
+                            break;
 
                         // Remove all completed messages
                         fragments.RemoveAll(x => removeList.Contains(x));
                     }
                 }
-                // If no messages, write optional headers
-                else
-                {
-                    packetLog.DebugFormat("[{0}] No messages, just sending optional headers", session.LoggingIdentifier);
-                    if (writeOptionalHeaders)
-                    {
-                        writeOptionalHeaders = false;
-                        WriteOptionalHeaders(bundle, packet);
-                        if (packet.Data != null)
-                            availableSpace -= (int)packet.Data.Length;
-                    }
-                }
+
+                //Always writemessage header information to server packet
                 EnqueueSend(packet);
             }
         }
-
-        private void WriteOptionalHeaders(NetworkBundle bundle, ServerPacket packet)
-        {
-            PacketHeader packetHeader = packet.Header;
-
-            if (bundle.SendAck) // 0x4000
-            {
-                packetHeader.Flags |= PacketHeaderFlags.AckSequence;
-                packetLog.DebugFormat("[{0}] Outgoing AckSeq: {1}", session.LoggingIdentifier, lastReceivedPacketSequence);
-                packet.InitializeDataWriter();
-                packet.DataWriter.Write(lastReceivedPacketSequence);
-            }
-
-            if (bundle.TimeSync) // 0x1000000
-            {
-                packetHeader.Flags |= PacketHeaderFlags.TimeSync;
-                packetLog.DebugFormat("[{0}] Outgoing TimeSync TS: {1}", session.LoggingIdentifier, Timers.PortalYearTicks);
-                packet.InitializeDataWriter();
-                packet.DataWriter.Write(Timers.PortalYearTicks);
-            }
-
-            if (bundle.ClientTime != -1f) // 0x4000000
-            {
-                packetHeader.Flags |= PacketHeaderFlags.EchoResponse;
-                packetLog.DebugFormat("[{0}] Outgoing EchoResponse: {1}", session.LoggingIdentifier, bundle.ClientTime);
-                packet.InitializeDataWriter();
-                packet.DataWriter.Write(bundle.ClientTime);
-                packet.DataWriter.Write((float)Timers.PortalYearTicks - bundle.ClientTime);
-            }
-        }
-
-
+        
         private bool isReleased;
 
         /// <summary>
@@ -885,15 +812,12 @@ namespace ReturnHome.Server.Network
                 currentBundles[i] = null;
 
             outOfOrderPackets.Clear();
-            partialFragments.Clear();
-            outOfOrderFragments.Clear();
+            //partialFragments.Clear();
+            outOfOrderMessages.Clear();
 
             cachedPackets.Clear();
 
             packetQueue.Clear();
-
-            ConnectionData.CryptoClient.ReleaseResources();
         }
-        */
     }
 }

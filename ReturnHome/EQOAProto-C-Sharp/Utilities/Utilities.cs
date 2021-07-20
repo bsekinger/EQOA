@@ -184,7 +184,7 @@ namespace ReturnHome.Utilities
         }
 
         //This method unpacks VLI data
-        static public uint Unpack(ReadOnlyMemory<byte> temp, ref int offset)
+        static public (uint, int) Unpack(ReadOnlyMemory<byte> temp, int offset)
         {
             ReadOnlySpan<byte> ClientPacket = temp.Span;
             uint val = 0;
@@ -206,7 +206,7 @@ namespace ReturnHome.Utilities
                 break;
             }
 
-            return val;
+            return (val, offset);
         }
 
         static public byte[] Pack(uint value)
@@ -239,13 +239,9 @@ namespace ReturnHome.Utilities
             return myList.ToArray();
         }
 
-        public static string GetMemoryString(ReadOnlySpan<byte> ClientPacket, ref int offset, int stringLength)
+        public static string GetMemoryString(ReadOnlySpan<byte> ClientPacket, int offset, int stringLength)
         {
-            try
-            { return Encoding.Default.GetString(ClientPacket.Slice(offset, stringLength)); }
-
-            finally
-            { offset += stringLength; }
+            return Encoding.Default.GetString(ClientPacket.Slice(offset, stringLength));
         }
 
         public static void WriteToBuffer<T>(this Memory<byte> buffer, T value, ref int offset) where T : unmanaged

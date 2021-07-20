@@ -21,8 +21,9 @@ namespace ReturnHome.Server.Network.GameMessages
 
             Writer = new System.IO.BinaryWriter(Data);
 
-            if (Opcode != GameMessageOpcode.None)
-                Writer.Write((uint)Opcode);
+            
+            if(opCode != GameMessageOpcode.None)
+                Writer.Write((ushort)Opcode);
         }
     }
 }

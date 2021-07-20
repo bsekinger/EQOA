@@ -16,7 +16,7 @@ namespace ReturnHome.Server.Network
         {
             Payload = payload;
 			offset = 0;
-            //Opcode = BinaryPrimitiveWrapper.GetLEUShort(Payload, ref offset);
+            (Opcode, offset) = BinaryPrimitiveWrapper.GetLEUShort(Payload, offset);
         }
     }
 }

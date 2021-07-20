@@ -11,17 +11,20 @@ namespace ReturnHome.Server.Network
 		public byte MessageType { get; set; }
         public ushort MessageNumber { get; set; }
         public ushort Size { get; set; }
-		public bool Split { get; set; }
+		public int Count { get; set; }
+        public int Index { get; set; }
+        public bool Split { get; set; }
 
         public void Unpack(ReadOnlyMemory<byte> buffer, ref int offset)
         {
+            byte temp;
             //Read first byte, if it is FF, read an additional byte (Indicates >255byte message
-            byte temp = BinaryPrimitiveWrapper.GetLEByte(buffer, ref offset);
+            (temp, offset) = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
 			if (temp == 0xFF)
 			{
-				MessageType   = BinaryPrimitiveWrapper.GetLEByte(buffer, ref offset);
-				Size          = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
-				MessageNumber = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
+				(MessageType, offset)   = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
+				(Size, offset)          = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
+				(MessageNumber, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
 				
 				//Message is split across 2+ packets
 				if (MessageType == 0xFA)
@@ -39,15 +42,17 @@ namespace ReturnHome.Server.Network
 			
 					//Cec
 					MessageType   = temp;
-					Size          = BinaryPrimitiveWrapper.GetLEByte(buffer, ref offset);
+					(Size, offset) = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
 					
 					//FC type is of an unreliable nature and does not have a message#
 					if (!(MessageType == 0xFC))
-						MessageNumber = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
+						(MessageNumber, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
 				}
 				
 				//Eventually check for unreliable messages "Character updates" from client
 			}
+
+            return;
         }
     }
 }

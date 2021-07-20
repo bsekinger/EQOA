@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 
+using ReturnHome.Server.Entity.Actions;
 using ReturnHome.Server.Network.GameAction;
 using ReturnHome.Server.Network.GameMessages;
 
@@ -84,17 +85,15 @@ namespace ReturnHome.Server.Network.Managers
         public static void HandleClientMessage(ClientMessage message, Session session)
         {
             var opcode = (GameMessageOpcode)message.Opcode;
-            /*
+            
             if (messageHandlers.TryGetValue(opcode, out var messageHandlerInfo))
             {
-                if (messageHandlerInfo.Attribute.State == session.State)
-                {
+                //if (messageHandlerInfo.Attribute.State == session.State)
+                //{
                     NetworkManager.InboundMessageQueue.EnqueueAction(new ActionEventDelegate(() =>
                     {
                         // It's possible that before this work is executed by WorldManager, and after it was enqueued here, the session.Player was set to null
                         // To avoid null reference exceptions, we make sure that the player is valid before the message handler is invoked.
-                        if (messageHandlerInfo.Attribute.State == Enum.SessionState.WorldConnected && session.Player == null)
-                            return;
 
                         try
                         {
@@ -102,17 +101,17 @@ namespace ReturnHome.Server.Network.Managers
                         }
                         catch (Exception ex)
                         {
-                            log.Error($"Received GameMessage packet that threw an exception from account: {session.AccountId}:{session.Account}, player: {session.Player?.Name}, opcode: 0x{((int)opcode):X4}:{opcode}");
-                            log.Error(ex);
+                            //log.Error($"Received GameMessage packet that threw an exception from account: {session.AccountId}:{session.Account}, player: {session.Player?.Name}, opcode: 0x{((int)opcode):X4}:{opcode}");
+                            //log.Error(ex);
                         }
                     }));
-                }
+                //}
             }
             else
             {
-                log.Warn($"Received unhandled fragment opcode: 0x{(int)opcode:X4} - {opcode}");
+                //log.Warn($"Received unhandled fragment opcode: 0x{(int)opcode:X4} - {opcode}");
             }
-            */
+            
         }
 
         /// <summary>

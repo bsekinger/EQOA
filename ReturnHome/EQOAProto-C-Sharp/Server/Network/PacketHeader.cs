@@ -23,21 +23,21 @@ namespace ReturnHome.Server.Network
 		public ushort ClientBundleAck { get; set; }
 		public ushort ClientMessageAck { get; set; }
 
-        public void Unpack(ReadOnlyMemory<byte> buffer, ref int offset)
+        public int Unpack(ReadOnlyMemory<byte> buffer, int offset)
         {
-            ClientEndPoint = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
-            TargetEndPoint = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
-            HeaderData     = Utility_Funcs.Unpack(buffer, ref offset);
+            (ClientEndPoint, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
+            (TargetEndPoint, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
+            (HeaderData, offset) = Utility_Funcs.Unpack(buffer, offset);
             BundleSize     = (ushort)(HeaderData & 0x7FF);
             headerFlags    = (PacketHeaderFlags)(HeaderData - BundleSize);
 
             //Verify packet has instance in header
             if (HasHeaderFlag(PacketHeaderFlags.HasInstance))
-                SessionID = BinaryPrimitiveWrapper.GetLEInt(buffer, ref offset);
+                (SessionID, offset) = BinaryPrimitiveWrapper.GetLEInt(buffer, offset);
 
             //if Client is "remote", means it is not "master" anymore and an additional pack value to read which ties into character instanceID
             if (HasHeaderFlag(PacketHeaderFlags.IsRemote))
-                InstanceID = Utility_Funcs.Unpack(buffer, ref offset);
+                (InstanceID, offset) = Utility_Funcs.Unpack(buffer, offset);
 			
 			else
 				InstanceID = 0;
@@ -51,18 +51,22 @@ namespace ReturnHome.Server.Network
 				CRCChecksum = buffer.Span.Slice(buffer.Length - 4, 4).SequenceEqual(CRC.calculateCRC(buffer.Span.Slice(0, buffer.Length - 4)));
 				
 			else
-				return;
-			
-			//Read Bundle Type
-			bundleFlags = (PacketBundleFlags)BinaryPrimitiveWrapper.GetLEByte(buffer, ref offset);
-			
-			ClientBundleNumber = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
+				return offset;
+
+            byte temp;
+			//Read Bundle Type, needs abit of a work around....
+			(temp, offset) = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
+			bundleFlags = (PacketBundleFlags)temp;
+
+            (ClientBundleNumber, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
 			if (HasBundleFlag(PacketBundleFlags.NewProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) || 
 			    HasBundleFlag(PacketBundleFlags.ProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessAll))
 			{
-				ClientBundleAck	 = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
-				ClientMessageAck = BinaryPrimitiveWrapper.GetLEUShort(buffer, ref offset);
+				(ClientBundleAck, offset)	 = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
+				(ClientMessageAck, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
 			}
+
+            return offset;
         }
 
         public bool HasHeaderFlag(PacketHeaderFlags HeaderFlags) { return (HeaderFlags & headerFlags) == HeaderFlags; }

@@ -4,19 +4,20 @@ namespace ReturnHome.Server.Network
 {
     public class ClientPacket : Packet
     {
+        public int offset = 0;
+
         public static int MaxPacketSize { get; } = 1024;
 
         public bool Unpack(ReadOnlyMemory<byte> buffer, int bufferSize)
         {
             //Track memory offset as packet is processed
-            int offset = 0;
 
             try
             {
                 if (bufferSize < Header.HeaderSize)
                     return false;
 
-                Header.Unpack(buffer, ref offset);
+                offset = Header.Unpack(buffer, offset);
 
                 //Subtract offset from buffersize to verify that the actual packet bundle size is not greater
                 if (Header.BundleSize > (bufferSize - offset))
@@ -33,7 +34,7 @@ namespace ReturnHome.Server.Network
 						return false;
 				
 					//If no messages to read, we are done
-					if (!ReadMessages(buffer, bufferSize, offset))
+					if (!ReadMessages(buffer, bufferSize))
 						return false;
 				}
 
@@ -48,7 +49,7 @@ namespace ReturnHome.Server.Network
             }
         }
 
-        private bool ReadMessages(ReadOnlyMemory<byte> buffer, int bufferSize, int offset)
+        private bool ReadMessages(ReadOnlyMemory<byte> buffer, int bufferSize)
         {
 			//If messages are present... process
             if (Header.HasBundleFlag(PacketBundleFlags.NewProcessMessages) || Header.HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||

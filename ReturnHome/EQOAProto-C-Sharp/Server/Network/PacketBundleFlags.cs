@@ -4,7 +4,7 @@ namespace ReturnHome.Server.Network
 {
 	//Contains bundle header flags along with BundleTypeFlags
     [Flags]
-    public enum PacketBundleFlags : byte  
+    public enum PacketBundleFlags  
     {
         NewProcessMessages      = 0x00,
 		NewProcessReport        = 0x03,
