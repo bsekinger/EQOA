@@ -66,7 +66,7 @@ namespace AuthServer.Server
             //This Clients IPAddress
             ClientIPEndPoint = ThisIPEndPoint;
 
-            Console.WriteLine($"Created new client: {ClientIPEndPoint}");
+            Console.WriteLine($"{DateTime.Now}: Created new client: {ClientIPEndPoint}");
         }
 
         public void ClearMessages()

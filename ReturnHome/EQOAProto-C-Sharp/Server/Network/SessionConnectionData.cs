@@ -9,8 +9,8 @@ namespace ReturnHome.Server.Network
 
         public SessionConnectionData()
         {
-            PacketSequence = 0;
-            MessageSequence = 0;
+            PacketSequence = 1;
+            MessageSequence = 1;
         }
     }
 }

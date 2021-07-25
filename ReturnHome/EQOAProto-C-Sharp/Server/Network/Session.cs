@@ -12,6 +12,7 @@ namespace ReturnHome.Server.Network
 {
     public class Session
     {
+        //Get this all in ConnectionData eventually
         public ushort ClientBundle = 0;
         public ushort ClientBundleAck = 0;
         public ushort ClientMessage = 0;
@@ -25,13 +26,13 @@ namespace ReturnHome.Server.Network
         public DateTime lastCharacterSelectPingReply;
         public AccessLevel AccessLevel { get; private set; }
         public IPEndPoint EndPoint { get; }
-        public ushort ClientEndPoint;
         public NetworkSession Network { get; set; }
         public uint InstanceID { get; }
-        public int SessionID { get; }
+        public uint SessionID { get; }
 
         public bool didServerInitiate { get; }
-        public bool hasInstance { get; }
+        //Just keep this true by default for now
+        public bool hasInstance = true;
 
 
         public SessionState State { get; set; }
@@ -41,7 +42,7 @@ namespace ReturnHome.Server.Network
         public uint AccountID { get; private set; }
         public string Username { get; private set; }
 
-        public Session(ServerListener connectionListener, IPEndPoint endPoint, int sessionID, uint instanceID, ushort clientId, ushort serverId, bool DidServerInitiate)
+        public Session(ServerListener connectionListener, IPEndPoint endPoint, uint sessionID, uint instanceID, ushort clientId, ushort serverId, bool DidServerInitiate)
         {
             didServerInitiate = DidServerInitiate;
             SessionID = sessionID;

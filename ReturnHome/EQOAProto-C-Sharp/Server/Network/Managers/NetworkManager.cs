@@ -210,7 +210,7 @@ namespace ReturnHome.Server.Network.Managers
                 //ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.DoSessionWork_TickOutbound);
 
                 //Temporarily disable to test
-                /*
+                //
                 // Removes sessions in the NetworkTimeout state, including sessions that have reached a timeout limit.
                 //ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.DoSessionWork_RemoveSessions);
                 foreach (var session in SessionHash.Where(k => !Equals(null, k)))

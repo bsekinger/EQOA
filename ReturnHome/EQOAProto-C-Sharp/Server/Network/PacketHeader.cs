@@ -14,10 +14,9 @@ namespace ReturnHome.Server.Network
         public uint HeaderData { get; set; }
         public PacketHeaderFlags headerFlags { get; set; }
         public PacketBundleFlags bundleFlags { get; set; }
-		public bool AckPacket{ get; set; }
         public bool CRCChecksum { get; set; }
         public ushort BundleSize { get; set; }
-        public int SessionID { get; set; }
+        public uint SessionID { get; set; }
         public uint InstanceID { get; set; }
 		public ushort ClientBundleNumber { get; set; }
 		public ushort ClientBundleAck { get; set; }
@@ -33,7 +32,7 @@ namespace ReturnHome.Server.Network
 
             //Verify packet has instance in header
             if (HasHeaderFlag(PacketHeaderFlags.HasInstance))
-                (SessionID, offset) = BinaryPrimitiveWrapper.GetLEInt(buffer, offset);
+                (SessionID, offset) = BinaryPrimitiveWrapper.GetLEUInt(buffer, offset);
 
             //if Client is "remote", means it is not "master" anymore and an additional pack value to read which ties into character instanceID
             if (HasHeaderFlag(PacketHeaderFlags.IsRemote))
@@ -66,12 +65,23 @@ namespace ReturnHome.Server.Network
 				(ClientMessageAck, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
 			}
 
-            return offset;
+            //This would indicate it's the end of the apcket if true, no messages
+            if ((offset + 4) == buffer.Length)
+                return offset + 4;
+
+            else
+                return offset;
         }
 
         public bool HasHeaderFlag(PacketHeaderFlags HeaderFlags) { return (HeaderFlags & headerFlags) == HeaderFlags; }
 		
 		public bool HasBundleFlag(PacketBundleFlags BundleFlags) { return (BundleFlags & bundleFlags) == BundleFlags; }
 
+        public void GetHeaderSize(Session session)
+        {
+            //Standard endpoints
+            HeaderSize = 4;
+
+        }
     }
 }

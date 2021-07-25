@@ -1,4 +1,5 @@
 ﻿using ReturnHome.Utilities;
+using ReturnHome.Server.Network;
 
 namespace ReturnHome.Server.Network.GameMessages.Messages
 {
@@ -6,7 +7,7 @@ namespace ReturnHome.Server.Network.GameMessages.Messages
     {
         public bool pass;
         public int Version;
-        public GameDiscVersion(PacketMessage message) : base(GameMessageOpcode.CheckGameDisc, GameMessageGroup.SecureWeenieQueue)
+        public GameDiscVersion(PacketMessage message) : base(0, GameMessageOpcode.CheckGameDisc, GameMessageGroup.SecureWeenieQueue)
         {
             int offset = 0;
             int GameVersion;
@@ -16,7 +17,7 @@ namespace ReturnHome.Server.Network.GameMessages.Messages
             pass =  true;
         }
 
-        public GameDiscVersion(int Version) : base(GameMessageOpcode.CheckGameDisc, GameMessageGroup.SecureWeenieQueue)
+        public GameDiscVersion(int Version) : base(MessageType.ReliableMessage, GameMessageOpcode.CheckGameDisc, GameMessageGroup.SecureWeenieQueue)
         {
             Writer.Write(Version);
         }

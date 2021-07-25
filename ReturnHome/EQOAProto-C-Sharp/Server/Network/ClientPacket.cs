@@ -11,7 +11,6 @@ namespace ReturnHome.Server.Network
         public bool Unpack(ReadOnlyMemory<byte> buffer, int bufferSize)
         {
             //Track memory offset as packet is processed
-
             try
             {
                 if (bufferSize < Header.HeaderSize)
@@ -33,9 +32,11 @@ namespace ReturnHome.Server.Network
 					if (!Header.CRCChecksum)
 						return false;
 				
-					//If no messages to read, we are done
+					//If no messages to read, check if there was an rdpreport, if not... guess we are done?
 					if (!ReadMessages(buffer, bufferSize))
-						return false;
+                        if (!Header.HasBundleFlag(PacketBundleFlags.NewProcessReport) || !Header.HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||
+                            !Header.HasBundleFlag(PacketBundleFlags.ProcessReport) ||! Header.HasBundleFlag(PacketBundleFlags.ProcessAll))
+						    return false;
 				}
 
                 return true;

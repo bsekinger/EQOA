@@ -14,7 +14,7 @@ namespace ReturnHome.Server.Network
 
         private readonly uint listeningPort;
 
-        private readonly byte[] buffer = new byte[ClientPacket.MaxPacketSize];
+        private readonly byte[] _buffer = new byte[ClientPacket.MaxPacketSize];
 
         private readonly IPAddress listeningHost;
 
@@ -58,7 +58,7 @@ namespace ReturnHome.Server.Network
             try
             {
                 EndPoint clientEndPoint = new IPEndPoint(listeningHost, 0);
-                Socket.BeginReceiveFrom(buffer, 0, buffer.Length, SocketFlags.None, ref clientEndPoint, OnDataReceive, Socket);
+                Socket.BeginReceiveFrom(_buffer, 0, _buffer.Length, SocketFlags.None, ref clientEndPoint, OnDataReceive, Socket);
             }
 			
             catch (SocketException socketException)
@@ -83,9 +83,10 @@ namespace ReturnHome.Server.Network
                 int dataSize = Socket.EndReceiveFrom(result, ref clientEndPoint);
 
                 IPEndPoint ipEndpoint = (IPEndPoint)clientEndPoint;
+                byte[] buffer = dataSize < _buffer.Length ? _buffer.AsSpan(0, dataSize).ToArray() : _buffer;
 
                 // TO-DO: generate ban entries here based on packet rates of endPoint, IP Address, and IP Address Range
-				/* If we want to debug packets
+                /* If we want to debug packets
                 if (packetLog.IsDebugEnabled)
                 {
                     byte[] data = new byte[dataSize];
@@ -99,6 +100,8 @@ namespace ReturnHome.Server.Network
 				*/
 
                 var packet = new ClientPacket();
+
+                Console.WriteLine("Received data from Client");
 
                 if (packet.Unpack(buffer.AsMemory(), dataSize))
                     NetworkManager.ProcessPacket(this, packet, ipEndpoint);

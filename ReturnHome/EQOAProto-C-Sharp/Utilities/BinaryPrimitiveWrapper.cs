@@ -13,6 +13,13 @@ namespace ReturnHome.Utilities
         }
 
         //Used to slice bytes from readonlymemory
+        public static (uint, int) GetLEUInt(ReadOnlyMemory<byte> mem, int offset)
+        {
+            offset += 4;
+            return (BinaryPrimitives.ReadUInt32LittleEndian(mem.Span.Slice(offset - 4, 4)), offset);
+        }
+
+        //Used to slice bytes from readonlymemory
         public static (uint, int) GetLEUint(ReadOnlyMemory<byte> mem, int offset)
         {
             offset += 4;

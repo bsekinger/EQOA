@@ -49,14 +49,14 @@ namespace AuthServer.Server
                         new ArraySegment<byte>(_buffer, 0, _buffSize), SocketFlags.None, new IPEndPoint(IPAddress.Any, 0));
                 byte[] buffer = result.ReceivedBytes < _buffSize ? _buffer.AsSpan(0, result.ReceivedBytes).ToArray() : _buffer;
                 theClient.CheckClientRequest(buffer);
-                Console.WriteLine($"Processing data for {theClient.ClientIPEndPoint}");
+                Console.WriteLine($"{DateTime.Now}: Processing data for {theClient.ClientIPEndPoint}");
 
                 if (result.ReceivedBytes == 0)
                     break;
             }
             _eqoaClientTracker.RemoveEQOAClient(theClient);
 
-            Console.WriteLine($"[{socket.RemoteEndPoint}]: disconnected");
+            Console.WriteLine($"{DateTime.Now}: [{socket.RemoteEndPoint}]: disconnected");
         }
 
         public static void ProcessSend(EQOAClient client)

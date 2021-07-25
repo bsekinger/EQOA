@@ -8,7 +8,7 @@ namespace ReturnHome.Server.Network.GameEvent
 
         protected Session Session { get; private set; }
 
-        protected GameEventMessage(GameEventType eventType, GameMessageGroup group, Session session) : base(GameMessageOpcode.GameEvent, group)
+        protected GameEventMessage(GameEventType eventType, GameMessageGroup group, Session session) : base(0, GameMessageOpcode.GameEvent, group)
         {
             EventType = eventType;
             Session = session;

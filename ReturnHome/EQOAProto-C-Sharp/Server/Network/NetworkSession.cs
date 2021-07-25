@@ -27,8 +27,6 @@ namespace ReturnHome.Server.Network
         private readonly Object[] currentBundleLocks = new Object[(int)GameMessageGroup.QueueMax];
         private readonly NetworkBundle[] currentBundles = new NetworkBundle[(int)GameMessageGroup.QueueMax];
 
-        private ConcurrentDictionary<ushort, ClientPacket> outOfOrderPackets = new ConcurrentDictionary<ushort, ClientPacket>();
-        //private ConcurrentDictionary<uint, MessageBuffer> partialFragments = new ConcurrentDictionary<uint, MessageBuffer>(); // May not be needed... Don't think client sends us split messages
         private ConcurrentDictionary<ushort, ClientMessage> outOfOrderMessages = new ConcurrentDictionary<ushort, ClientMessage>();
 
         private DateTime nextSend = DateTime.UtcNow;
@@ -40,12 +38,18 @@ namespace ReturnHome.Server.Network
 
         public readonly SessionConnectionData ConnectionData = new SessionConnectionData();
 
-        // Ack should be sent after a 300 millisecond delay, so start enabled with the delay.
-        private bool sendAck = false;
+        //If an Ack is needed to client
+        public bool sendAck = false;
+
+        //Ack's client session, or makes sure client ack's ours.
+        //Probably need checks to verify client has ack'd a session we created before continuing
+        public bool sendSessionAck = false;
+        public bool sessionApproved = false;
+
         //private DateTime nextAck = DateTime.UtcNow.AddMilliseconds(timeBetweenAck);
 
-        private ushort lastReceivedPacketSequence = 0;
-        private ushort lastReceivedMessageSequence = 0;
+        public ushort lastReceivedPacketSequence = 0;
+        public ushort lastReceivedMessageSequence = 0;
 
         /// <summary>
         /// This is referenced from many threads:<para />
@@ -88,7 +92,7 @@ namespace ReturnHome.Server.Network
             ServerId = serverId;
 
             // New network auth session timeouts will always be low.
-			// Look into this
+			// Look into this, timeout varies between 30s to 180s, but suppose we could enforce whatever we want
             TimeoutTick = 30000;
 
             for (int i = 0; i < currentBundles.Length; i++)
@@ -149,7 +153,10 @@ namespace ReturnHome.Server.Network
                 return;
 
             if (DateTime.UtcNow - lastCachedPacketPruneTime > cachedPacketPruneInterval)
+            {
+                //Console.WriteLine("Pruning packets");
                 //PruneCachedPackets();
+            }
 
             for (int i = 0; i < currentBundles.Length; i++)
             {
@@ -196,8 +203,9 @@ namespace ReturnHome.Server.Network
                 }
             }
 
-            //FlushPackets();
+            FlushPackets();
         }
+
         /*
         private void PruneCachedPackets()
         {
@@ -212,6 +220,7 @@ namespace ReturnHome.Server.Network
                 cachedPackets.TryRemove(packet.Header.Sequence, out _);
         }
         */
+
         // This is called from ConnectionListener.OnDataReceieve()->Session.ProcessPacket()->This
         /// <summary>
         /// Processes an incoming packet from a client.
@@ -230,45 +239,21 @@ namespace ReturnHome.Server.Network
 
             if (packet.Header.HasHeaderFlag(PacketHeaderFlags.ResetConnection))
             {
-                //session.Terminate(SessionTerminationReason.PacketHeaderDisconnect);
+                session.Terminate(SessionTerminationReason.PacketHeaderDisconnect);
                 return;
             }
-
-            // depending on the current session state:
-            // Set the next timeout tick value, to compare against in the WorldManager
-            // Sessions that have gone past the AuthLoginRequest step will stay active for a longer period of time (exposed via configuration) 
-            // Sessions that are in the AuthLoginRequest will have a short timeout, as set in the AuthenticationHandler.DefaultAuthTimeout.
-            // Example: Applications that check uptime will stay in the AuthLoginRequest state.
-            //session.Network.TimeoutTick = (session.State == SessionState.AuthLoginRequest) ?
-                //DateTime.UtcNow.AddSeconds(AuthenticationHandler.DefaultAuthTimeout).Ticks : // Default is 15s
-                //DateTime.UtcNow.AddSeconds(NetworkManager.DefaultSessionTimeout).Ticks; // Default is 60s
-
-            #endregion
-
-            #region Reordering stage
-
-            // Check if this packet's sequence is greater then the next one we should be getting.
-            // If true we must store it to replay once we have caught up.
-			/*
-			CONSIDERATION: We may not want to store packets based on bundle # and tracking that way. 
-			Bundle #'s appear disposable, as a new packet that is the exact same as a prior one, will have the next sequence #.
-			May be better to store data like messages for review later if the sequence is out of order.
-			*/
 			
+			//If packet packet# is less then expected packet#, let's drop it. 
+			//Packet ordering is not gauranteed and messages that get recent have a new packet#, implying only messages are reliable
             var desiredSeq = lastReceivedPacketSequence + 1;
-            if (packet.Header.ClientBundleNumber > desiredSeq)
+            if (packet.Header.ClientBundleNumber < desiredSeq)
             {
-                //packetLog.DebugFormat("[{0}] Packet {1} received out of order", session.LoggingIdentifier, packet.Header.Sequence);
-
-                if (!outOfOrderPackets.ContainsKey(packet.Header.ClientBundleNumber))
-                    outOfOrderPackets.TryAdd(packet.Header.ClientBundleNumber, packet);
-
-				//Have an idea of what this request looks like, but need to solidify that one of these days, probably a final step to a "most" stable ingame experience.
-                //if (desiredSeq + 2 <= packet.Header.Sequence && DateTime.UtcNow - LastRequestForRetransmitTime > new TimeSpan(0, 0, 1))
-                    //DoRequestForRetransmission(packet.Header.Sequence);
-
+				//Delayed/lost packet, drop it
                 return;
             }
+
+            //Set our sequence# to our most recent, and accepted, packet.
+            lastReceivedPacketSequence = packet.Header.ClientBundleNumber;
 
             #endregion
 
@@ -278,56 +263,14 @@ namespace ReturnHome.Server.Network
             // If we reach here, this is a packet we should proceed with processing.
             HandleOrderedPacket(packet);
 
-            // Process data now in sequence
-            // Finally check if we have any out of order packets or fragments we need to process;
-            CheckOutOfOrderPackets();
+            // Need to process messages in sequence
+            //CheckOutOfOrderPackets();
 
             #endregion
         }
 
         
         const uint MaxNumNakSeqIds = 115; //464 + header = 484;  (464 - 4) / 4
-        /*
-        /// <summary>
-        /// request retransmission of lost sequences
-        /// </summary>
-        /// <param name="rcvdSeq">the sequence of the packet that was just received.</param>
-        private void DoRequestForRetransmission(uint rcvdSeq)
-        {
-            var desiredSeq = lastReceivedPacketSequence + 1;
-            List<uint> needSeq = new List<uint>();
-            needSeq.Add(desiredSeq);
-            uint bottom = desiredSeq + 1;
-
-            uint seqIdCount = 1;
-            for (uint a = bottom; a < rcvdSeq; a++)
-            {
-                if (!outOfOrderPackets.ContainsKey(a))
-                {
-                    needSeq.Add(a);
-                    seqIdCount++;
-                    if (seqIdCount >= MaxNumNakSeqIds)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            ServerPacket reqPacket = new ServerPacket();
-            byte[] reqData = new byte[4 + (needSeq.Count * 4)];
-            MemoryStream msReqData = new MemoryStream(reqData, 0, reqData.Length, true, true);
-            msReqData.Write(BitConverter.GetBytes((uint)needSeq.Count), 0, 4);
-            needSeq.ForEach(k => msReqData.Write(BitConverter.GetBytes(k), 0, 4));
-            reqPacket.Data = msReqData;
-            reqPacket.Header.Flags = PacketHeaderFlags.RequestRetransmit;
-
-            EnqueueSend(reqPacket);
-
-            LastRequestForRetransmitTime = DateTime.UtcNow;
-            packetLog.DebugFormat("[{0}] Requested retransmit of {1}", session.LoggingIdentifier, needSeq.Select(k => k.ToString()).Aggregate((a, b) => a + ", " + b));
-            NetworkStatistics.S2C_RequestsForRetransmit_Aggregate_Increment();
-        }
-        */
 
         private DateTime LastRequestForRetransmitTime = DateTime.MinValue;
 
@@ -340,37 +283,14 @@ namespace ReturnHome.Server.Network
         {
             //packetLog.DebugFormat("[{0}] Handling packet {1}", session.LoggingIdentifier, packet.Header.Sequence);
 
-            // If we have an EchoRequest flag, we should flag to respond with an echo response on next send.
-			//How would we handle a echo request, this seems to be an opcode on eqoa, keep an eye out for this in opcode/message processing
-            /*if (packet.Header.HasFlag(PacketHeaderFlags.EchoRequest))
-            {
-                FlagEcho(packet.HeaderOptional.EchoRequestClientTime);
-                VerifyEcho(packet.HeaderOptional.EchoRequestClientTime);
-            }*/
-
             // Received an rudp report, flush out old packet up to ack
-			/* 
-			CONSIDERATION: We will not store packets, rather messages. 
-			Upon receiving a client ack, we will filter through and remove messages to ack
-			*/
-			
             if (packet.Header.HasBundleFlag(PacketBundleFlags.NewProcessReport) || packet.Header.HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||
                 packet.Header.HasBundleFlag(PacketBundleFlags.ProcessReport) || packet.Header.HasBundleFlag(PacketBundleFlags.ProcessAll))
             {
-
+				
             }
             //AcknowledgeSequence(packet.HeaderOptional.AckSequence); //Revisit this eventually, need to incorporate Packets/messages being saved based on message #
 
-            /* Don't think we really need this
-            if (packet.Header.HasFlag(PacketHeaderFlags.TimeSync))
-            {
-                //packetLog.DebugFormat("[{0}] Incoming TimeSync TS: {1}", session.LoggingIdentifier, packet.HeaderOptional.TimeSynch);
-                // Do something with this...
-                // Based on network traces these are not 1:1.  Server seems to send them every 20 seconds per port.
-                // Client seems to send them alternatingly every 2 or 4 seconds per port.
-                // We will send this at a 20 second time interval.  I don't know what to do with these when we receive them at this point.
-            }
-			*/
 
             // This should be set on the first packet to the server indicating the client is logging in.
             // This is the start of a three-way handshake between the client and server (LoginRequest, ConnectRequest, ConnectResponse)
@@ -380,17 +300,26 @@ namespace ReturnHome.Server.Network
             {
                 //Need to trigger session ack here
                 //packetLog.Debug($"[{session.LoggingIdentifier}] LoginRequest");
-                
+                sendSessionAck = true;
+                sendAck = true;
                 AuthenticationHandler.HandleLoginRequest(packet, session); //Revisit this, authentication/verification of sent data needs to happen
+
+                //Assuming this went well, lets assume we got the 2 correct messages?
+                lastReceivedMessageSequence = 0x02;
                 return;
             }
 
             // Process all messages out of the packet
             foreach (ClientPacketMessage message in packet.Messages)
+            {
                 ProcessMessage(message);
+                if (message.Header.MessageType == (byte)MessageType.ReliableMessage)
+                    sendAck = true;
+            }
+                
 
             //After done processing messages, set session ack flag
-            // Update the last received sequence.
+            //Update the last received sequence.
             //if (packet.Header.Sequence != 0 && (packet.Header.Flags != PacketHeaderFlags.AckSequence))
                 //lastReceivedPacketSequence = packet.Header.Sequence;
         }
@@ -404,43 +333,7 @@ namespace ReturnHome.Server.Network
             //packetLog.DebugFormat("[{0}] Processing fragment {1}", session.LoggingIdentifier, fragment.Header.Sequence);
 
             ClientMessage message = null;
-
-            // Check if this message is split
-			/* Messages from client *shouldn't* be big enough to have split
-            if (packetMessage.Header.Split)
-            {
-                // Packet is split
-                //packetLog.DebugFormat("[{0}] Fragment {1} is split, this index {2} of {3} fragments", session.LoggingIdentifier, fragment.Header.Sequence, fragment.Header.Index, fragment.Header.Count);
-
-                if (partialFragments.TryGetValue(packetMessage.Header.Sequence, out var buffer))
-                {
-                    // Existing buffer, add this to it and check if we are finally complete.
-                    buffer.AddFragment(fragment);
-                    packetLog.DebugFormat("[{0}] Added fragment {1} to existing buffer. Buffer at {2} of {3}", session.LoggingIdentifier, fragment.Header.Sequence, buffer.Count, buffer.TotalFragments);
-                    if (buffer.Complete)
-                    {
-                        // The buffer is complete, so we can go ahead and handle
-                        packetLog.DebugFormat("[{0}] Buffer {1} is complete", session.LoggingIdentifier, buffer.Sequence);
-                        message = buffer.GetMessage();
-                        MessageBuffer removed = null;
-                        partialFragments.TryRemove(fragment.Header.Sequence, out removed);
-                    }
-                }
-                else
-                {
-                    // No existing buffer, so add a new one for this fragment sequence.
-                    packetLog.DebugFormat("[{0}] Creating new buffer {1} for this split fragment", session.LoggingIdentifier, fragment.Header.Sequence);
-                    var newBuffer = new MessageBuffer(fragment.Header.Sequence, fragment.Header.Count);
-                    newBuffer.AddFragment(fragment);
-
-                    packetLog.DebugFormat("[{0}] Added fragment {1} to the new buffer. Buffer at {2} of {3}", session.LoggingIdentifier, fragment.Header.Sequence, newBuffer.Count, newBuffer.TotalFragments);
-                    partialFragments.TryAdd(fragment.Header.Sequence, newBuffer);
-                }
-            }
-			*/
 			
-            // Packet is not split, proceed with handling it.
-            // packetLog.DebugFormat("[{0}] Fragment {1} is not split", session.LoggingIdentifier, fragment.Header.Sequence);
             message = new ClientMessage(packetMessage.Data);
 
             // If message is not null, we have a complete message to handle
@@ -471,24 +364,11 @@ namespace ReturnHome.Server.Network
             InboundMessageManager.HandleClientMessage(message, session);
             lastReceivedMessageSequence++;
         }
-
-        
-        /// <summary>
-        /// Checks if we now have packets queued out of order which should be processed as the next sequence.
-        /// </summary>
-        private void CheckOutOfOrderPackets()
-        {
-            while (outOfOrderPackets.TryRemove((ushort)(lastReceivedPacketSequence + 1), out var packet))
-            {
-                //packetLog.DebugFormat("[{0}] Ready to handle out-of-order packet {1}", session.LoggingIdentifier, packet.Header.Sequence);
-                HandleOrderedPacket(packet);
-            }
-        }
         
         /// <summary>
         /// Checks if we now have fragments queued out of order which should be handled as the next sequence.
         /// </summary>
-        private void CheckOutOfOrderFragments()
+        private void CheckOutOfOrderMessages()
         {
             while (outOfOrderMessages.TryRemove((ushort)(lastReceivedMessageSequence + 1), out var message))
             {
@@ -623,29 +503,12 @@ namespace ReturnHome.Server.Network
 
             return false;
         }*/
-        /*
+        
         private void FlushPackets()
         {
             while (packetQueue.TryDequeue(out var packet))
             {
-                //packetLog.DebugFormat("[{0}] Flushing packets, count {1}", session.LoggingIdentifier, packetQueue.Count);
-
-                if (packet.Header.HasFlag(PacketHeaderFlags.EncryptedChecksum) && ConnectionData.PacketSequence.CurrentValue == 0)
-                    ConnectionData.PacketSequence = new Sequence.UIntSequence(1);
-
-                bool isNak = packet.Header.Flags.HasFlag(PacketHeaderFlags.RequestRetransmit);
-
-                // If we are only ACKing, then we don't seem to have to increment the sequence
-                if (packet.Header.Flags == PacketHeaderFlags.AckSequence || isNak)
-                    packet.Header.Sequence = ConnectionData.PacketSequence.CurrentValue;
-                else
-                    packet.Header.Sequence = ConnectionData.PacketSequence.NextValue;
-                packet.Header.Id = ServerId;
-                packet.Header.Iteration = 0x14;
-                packet.Header.Time = (ushort)Timers.PortalYearTicks;
-
-                if (packet.Header.Sequence >= 2u && !isNak)
-                    cachedPackets.TryAdd(packet.Header.Sequence, packet);
+                //Packet should be fully formed at this point... We need to cache messages for resend, not packets
 
                 SendPacket(packet);
             }
@@ -653,37 +516,31 @@ namespace ReturnHome.Server.Network
         
         private void SendPacket(ServerPacket packet)
         {
-            //packetLog.DebugFormat("[{0}] Sending packet {1}", session.LoggingIdentifier, packet.GetHashCode());
-            //NetworkStatistics.S2C_Packets_Aggregate_Increment();
-
-            //SendPacketRaw(packet);
+            Console.WriteLine("Sending Packet...");
+            SendPacketRaw(packet);
         }
-        /*
+        
         private void SendPacketRaw(ServerPacket packet)
         {
-            byte[] buffer = ArrayPool<byte>.Shared.Rent((int)(PacketHeader.HeaderSize + (packet.Data?.Length ?? 0) + (packet.Messages.Count * PacketMessage.)));
 
+            
             try
             {
                 var socket = connectionListener.Socket;
 
-                packet.CreateReadyToSendPacket(buffer, out var size);
+                Memory<byte> buffer;
 
-                //packetLog.Debug(packet.ToString());
-
-                //if (packetLog.IsDebugEnabled)
-                //{
-                    //var listenerEndpoint = (System.Net.IPEndPoint)socket.LocalEndPoint;
-                    //var sb = new StringBuilder();
-                    //sb.AppendLine(String.Format("[{5}] Sending Packet (Len: {0}) [{1}:{2}=>{3}:{4}]", size, listenerEndpoint.Address, listenerEndpoint.Port, session.EndPoint.Address, session.EndPoint.Port, session.Network.ClientId));
-                    //sb.AppendLine(buffer.BuildPacketString(0, size));
-                    //packetLog.Debug(sb.ToString());
-                //}
+                buffer = packet.CreateReadyToSendPacket(session);
 
                 try
                 {
-                    socket.SendTo(buffer, size, SocketFlags.None, session.EndPoint);
+                    SocketAsyncEventArgs e = new();
+                    e.SetBuffer(buffer);
+                    e.RemoteEndPoint = session.EndPoint;
+
+                    socket.SendToAsync(e);
                 }
+
                 catch (SocketException ex)
                 {
                     // Unhandled Exception: System.Net.Sockets.SocketException: A message sent on a datagram socket was larger than the internal message buffer or some other network limit, or the buffer used to receive a datagram into was smaller than the datagram itself
@@ -699,11 +556,12 @@ namespace ReturnHome.Server.Network
                     session.Terminate(SessionTerminationReason.SendToSocketException, null, null, ex.Message);
                 }
             }
+
             finally
             {
-                ArrayPool<byte>.Shared.Return(buffer, true);
+
             }
-        }*/
+        }
         
         /// <summary>
         /// This function handles turning a bundle of messages (representing all messages accrued in a timeslice),
@@ -713,28 +571,35 @@ namespace ReturnHome.Server.Network
         /// <param name="bundle"></param>
         private void SendBundle(NetworkBundle bundle, GameMessageGroup group)
         {
-            //packetLog.DebugFormat("[{0}] Sending Bundle", session.LoggingIdentifier);
-
-            bool writeOptionalHeaders = true;
 
             List<ServerMessage> fragments = new List<ServerMessage>();
 
             // Pull all messages out and create MessageFragment objects
             while (bundle.HasMoreMessages)
             {
-                var message = bundle.Dequeue();
-
-                var fragment = new ServerMessage(message, ConnectionData.MessageSequence++);
-                fragments.Add(fragment);
+                var thisMessage = bundle.Dequeue();
+				
+				//If message is not FC type, it uses the sequence number ...Need to consider something to handle unreliables as they use their own message # per channel
+				if (thisMessage.Messagetype != (byte)MessageType.UnreliableMessage)
+				{
+					var fragment = new ServerMessage(thisMessage, ConnectionData.MessageSequence++);
+					fragments.Add(fragment);
+				}
+				
+				//If message is FC type, does not use message #s
+				else
+				{
+					var fragment = new ServerMessage(thisMessage, 0);
+					fragments.Add(fragment);
+				}
             }
 
             //packetLog.DebugFormat("[{0}] Bundle Fragment Count: {1}", session.LoggingIdentifier, fragments.Count);
 
-            // Loop through while we have fragements
-            while (fragments.Count > 0 || writeOptionalHeaders)
+            // Loop through while we have messages
+            while (fragments.Count > 0)
             {
                 ServerPacket packet = new ServerPacket();
-                PacketHeader packetHeader = packet.Header;
 
                 int availableSpace = ServerPacket.MaxPacketSize;
 
@@ -752,6 +617,7 @@ namespace ReturnHome.Server.Network
                         if (firstMessage.DataRemaining <= 0)
                             fragments.Remove(firstMessage);
                     }
+					
                     // Create a list to remove completed messages after iterator
                     List<ServerMessage> removeList = new List<ServerMessage>();
 
@@ -787,10 +653,10 @@ namespace ReturnHome.Server.Network
                         // UIQueue messages must go out in order. Otherwise, you might see an NPC's tells in an order that doesn't match their defined emotes.
                         if (fragmentSkipped && group == GameMessageGroup.UIQueue)
                             break;
-
-                        // Remove all completed messages
-                        fragments.RemoveAll(x => removeList.Contains(x));
                     }
+
+                    // Remove all completed messages
+                    fragments.RemoveAll(x => removeList.Contains(x));
                 }
 
                 //Always writemessage header information to server packet
@@ -811,7 +677,6 @@ namespace ReturnHome.Server.Network
             for (int i = 0; i < currentBundles.Length; i++)
                 currentBundles[i] = null;
 
-            outOfOrderPackets.Clear();
             //partialFragments.Clear();
             outOfOrderMessages.Clear();
 

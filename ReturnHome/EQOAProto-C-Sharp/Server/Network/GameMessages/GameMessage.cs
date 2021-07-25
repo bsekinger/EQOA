@@ -3,6 +3,8 @@ namespace ReturnHome.Server.Network.GameMessages
 {
     public abstract class GameMessage
     {
+		public byte Messagetype {get; private set;}
+		
         public GameMessageOpcode Opcode { get; private set; }
 
         public System.IO.MemoryStream Data { get; private set; }
@@ -11,8 +13,10 @@ namespace ReturnHome.Server.Network.GameMessages
 
         protected System.IO.BinaryWriter Writer { get; private set; }
 
-        protected GameMessage(GameMessageOpcode opCode, GameMessageGroup group)
+        protected GameMessage(MessageType messageType, GameMessageOpcode opCode, GameMessageGroup group)
         {
+			Messagetype = (byte)messageType;
+			
             Opcode = opCode;
 
             Group = group;
