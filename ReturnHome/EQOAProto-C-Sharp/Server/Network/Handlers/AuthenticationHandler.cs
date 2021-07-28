@@ -30,6 +30,7 @@ namespace ReturnHome.Server.Network.Handlers
                 {
                     //Drop packet and fail if this fails
                 }
+
                 //Process Account verification
                 PacketInboundLoginRequest loginRequest = new PacketInboundLoginRequest(packet.Messages[1]);
 

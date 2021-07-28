@@ -36,12 +36,12 @@ namespace ReturnHome.Server.Network
 			{
 				if (temp == 0xFA || temp == 0xFB || temp == 0xF9 || temp == 0xFC)
 				{
-					//Check if split
-					if (MessageType == 0xFA)
+                    MessageType = temp;
+
+                    //Check if split
+                    if (MessageType == 0xFA)
 						Split = true;
 			
-					//Cec
-					MessageType   = temp;
 					(Size, offset) = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
 					
 					//FC type is of an unreliable nature and does not have a message#
