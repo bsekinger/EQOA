@@ -11,14 +11,16 @@ namespace ReturnHome.Server.Network
         //private static readonly ILog packetLog = LogManager.GetLogger(System.Reflection.Assembly.GetEntryAssembly(), "Packets");
 
         public GameMessage Message { get; private set; }
-		
-		private byte[] data;
-		
+
+        private byte[] data;
+
         public ushort Sequence { get; set; }
 
         public ushort Index { get; set; }
 
         public ushort Count { get; set; }
+
+        public DateTime Time { get; private set; }
 
         public int DataLength => (int)Message.Data.Length;
 
@@ -42,6 +44,7 @@ namespace ReturnHome.Server.Network
         public ServerMessage(GameMessage message, ushort sequence)
         {
             Message = message;
+            Time = DateTime.UtcNow;
             DataRemaining = DataLength;
             Sequence = sequence;
             Count = (ushort)(Math.Ceiling((double)DataLength / PacketMessage.MaxMessageSize));
@@ -50,6 +53,11 @@ namespace ReturnHome.Server.Network
             if (Count == 1)
                 TailSent = true;
             //packetLog.DebugFormat("Sequence {0}, Count {1}, DataRemaining {2}", sequence, Count, DataRemaining);
+        }
+
+        public void UpdateTime()
+        {
+            Time = DateTime.UtcNow;
         }
 
         public ServerPacketMessage GetTailFragment()
@@ -86,8 +94,8 @@ namespace ReturnHome.Server.Network
 
             // Read data starting at position reading dataToSend bytes
             Message.Data.Seek(position, SeekOrigin.Begin);
-			
-			ProcessMessageTypeAndHeader(dataToSend);
+
+            ProcessMessageTypeAndHeader(dataToSend);
 
             // Build ServerPacketFragment structure
             ServerPacketMessage fragment = new ServerPacketMessage(data);
@@ -99,125 +107,125 @@ namespace ReturnHome.Server.Network
             //packetLog.DebugFormat("Done creating ServerFragment for Index {0}. After reading {1} DataRemaining {2}", Index, dataToSend, DataRemaining);
             return fragment;
         }
-		
-		private void ProcessMessageTypeAndHeader(int dataToSend)
-		{
-			if(Message.Messagetype == (byte)MessageType.ReliableMessage)
-			{
-				ProcessFBType(dataToSend);
-			}
-			
-			//This MessageType has no message #'s, fire and forget
-			else if (Message.Messagetype == (byte)MessageType.UnreliableMessage)
-			{
-				ProcessFCType(dataToSend);
-			}
-			
-			//F9 type, seems to be a "ping" response
-			else if (Message.Messagetype == (byte)MessageType.PingMessage)
-			{
-				ProcessF9(dataToSend);
-			}
-			
-			//Reserved for unreliable message types
-			else
-			{
-				ProcessUnreliable(dataToSend);
-			}
-		}
-		
-		private void ProcessFBType(int dataToSend)
-		{
-			//Means there is a need for multiple packets for this message, and it is not the last packet of this message
-			if(Index < Count)
-			{
-				//If message is greater then 255 bytes, prefix with FF
-				if (dataToSend > 255)
-				{
-					//Check if this message needs to span multiple packets
-					data = new byte[dataToSend + 6];
-					data[0] = 0xFF;
-					data[1] = 0xFB;
-					data[2] = (byte)(dataToSend & 0x00FF);
-					data[3] = (byte)(dataToSend & 0xFF);
-					data[4] = (byte)(Sequence);
-					data[5] = (byte)(Sequence >> 8);
-					Message.Data.Read(data, 6, dataToSend);
-				}
-					
-				else
-				{
-					data = new byte[dataToSend + 4];
-					data[0] = 0xFB;
-					data[1] = (byte)(dataToSend);
-					data[2] = (byte)(Sequence);
-					data[3] = (byte)(Sequence >> 8);
-					Message.Data.Read(data,4, dataToSend);
-				}
-			}
-			
-			else
-			{
-				//If message is greater then 255 bytes, prefix with FF
-				if (dataToSend > 255)
-				{
-					data = new byte[dataToSend + 6];
-					data[0] = 0xFF;
-					data[1] = 0xFA;
-					data[2] = (byte)(dataToSend & 0x00FF);
-					data[3] = (byte)(dataToSend & 0xFF);
-					data[4] = (byte)(Sequence);
-					data[5] = (byte)(Sequence >> 8);
-					Message.Data.Read(data, 6, dataToSend);
-				}
-					
-				else
-				{
-					data = new byte[dataToSend + 4];
-					data[0] = 0xFB;
-					data[1] = (byte)(dataToSend);
-					data[2] = (byte)(Sequence);
-					data[3] = (byte)(Sequence >> 8);
-					Message.Data.Read(data,4, dataToSend);
-				}
-			}
-		}
-		
-		private void ProcessFCType(int dataToSend)
-		{
-			//If message is greater then 255 bytes, prefix with FF
-			if (dataToSend > 255)
-			{
-				data = new byte[dataToSend + 4];
-				data[0] = 0xFF;
-				data[1] = 0xFC;
-				data[2] = (byte)(dataToSend & 0x00FF);
-				data[3] = (byte)(dataToSend & 0xFF);
-				Message.Data.Read(data, 4, dataToSend);
-			}
-					
-			else
-			{
-				data = new byte[dataToSend + 2];
-				data[0] = 0xFB;
-				data[1] = (byte)(dataToSend);
-				Message.Data.Read(data,2, dataToSend);
-			}
-		}
-		
-		private void ProcessF9(int dataToSend)
-		{
-			data = new byte[dataToSend + 4];
-			data[0] = 0xF9;
-			data[1] = (byte)(dataToSend);
-			data[2] = (byte)(Sequence);
-			data[3] = (byte)(Sequence >> 8);
-			Message.Data.Read(data,4, dataToSend);
-		}
-		
-		private void ProcessUnreliable(int dataToSend)
-		{
-			
-		}
+
+        private void ProcessMessageTypeAndHeader(int dataToSend)
+        {
+            if (Message.Messagetype == (byte)MessageType.ReliableMessage)
+            {
+                ProcessFBType(dataToSend);
+            }
+
+            //This MessageType has no message #'s, fire and forget
+            else if (Message.Messagetype == (byte)MessageType.UnreliableMessage)
+            {
+                ProcessFCType(dataToSend);
+            }
+
+            //F9 type, seems to be a "ping" response
+            else if (Message.Messagetype == (byte)MessageType.PingMessage)
+            {
+                ProcessF9(dataToSend);
+            }
+
+            //Reserved for unreliable message types
+            else
+            {
+                ProcessUnreliable(dataToSend);
+            }
+        }
+
+        private void ProcessFBType(int dataToSend)
+        {
+            //Means there is a need for multiple packets for this message, and it is not the last packet of this message
+            if (Index < Count)
+            {
+                //If message is greater then 255 bytes, prefix with FF
+                if (dataToSend > 255)
+                {
+                    //Check if this message needs to span multiple packets
+                    data = new byte[dataToSend + 6];
+                    data[0] = 0xFF;
+                    data[1] = 0xFB;
+                    data[2] = (byte)(dataToSend & 0x00FF);
+                    data[3] = (byte)(dataToSend & 0xFF);
+                    data[4] = (byte)(Sequence);
+                    data[5] = (byte)(Sequence >> 8);
+                    Message.Data.Read(data, 6, dataToSend);
+                }
+
+                else
+                {
+                    data = new byte[dataToSend + 4];
+                    data[0] = 0xFB;
+                    data[1] = (byte)(dataToSend);
+                    data[2] = (byte)(Sequence);
+                    data[3] = (byte)(Sequence >> 8);
+                    Message.Data.Read(data, 4, dataToSend);
+                }
+            }
+
+            else
+            {
+                //If message is greater then 255 bytes, prefix with FF
+                if (dataToSend > 255)
+                {
+                    data = new byte[dataToSend + 6];
+                    data[0] = 0xFF;
+                    data[1] = 0xFA;
+                    data[2] = (byte)(dataToSend & 0x00FF);
+                    data[3] = (byte)(dataToSend & 0xFF);
+                    data[4] = (byte)(Sequence);
+                    data[5] = (byte)(Sequence >> 8);
+                    Message.Data.Read(data, 6, dataToSend);
+                }
+
+                else
+                {
+                    data = new byte[dataToSend + 4];
+                    data[0] = 0xFB;
+                    data[1] = (byte)(dataToSend);
+                    data[2] = (byte)(Sequence);
+                    data[3] = (byte)(Sequence >> 8);
+                    Message.Data.Read(data, 4, dataToSend);
+                }
+            }
+        }
+
+        private void ProcessFCType(int dataToSend)
+        {
+            //If message is greater then 255 bytes, prefix with FF
+            if (dataToSend > 255)
+            {
+                data = new byte[dataToSend + 4];
+                data[0] = 0xFF;
+                data[1] = 0xFC;
+                data[2] = (byte)(dataToSend & 0x00FF);
+                data[3] = (byte)(dataToSend & 0xFF);
+                Message.Data.Read(data, 4, dataToSend);
+            }
+
+            else
+            {
+                data = new byte[dataToSend + 2];
+                data[0] = 0xFB;
+                data[1] = (byte)(dataToSend);
+                Message.Data.Read(data, 2, dataToSend);
+            }
+        }
+
+        private void ProcessF9(int dataToSend)
+        {
+            data = new byte[dataToSend + 4];
+            data[0] = 0xF9;
+            data[1] = (byte)(dataToSend);
+            data[2] = (byte)(Sequence);
+            data[3] = (byte)(Sequence >> 8);
+            Message.Data.Read(data, 4, dataToSend);
+        }
+
+        private void ProcessUnreliable(int dataToSend)
+        {
+
+        }
     }
 }

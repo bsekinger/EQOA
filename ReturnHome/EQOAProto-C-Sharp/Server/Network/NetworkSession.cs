@@ -58,8 +58,8 @@ namespace ReturnHome.Server.Network
         /// </summary>
         private readonly ConcurrentDictionary<ushort /*seq*/, ServerMessage> cachedMessages = new ConcurrentDictionary<ushort /*seq*/, ServerMessage>();
 
-        private static readonly TimeSpan cachedPacketPruneInterval = TimeSpan.FromSeconds(5);
-        private DateTime lastCachedPacketPruneTime;
+        private static readonly TimeSpan cachedMessageResendInterval = TimeSpan.FromSeconds(2);
+        private DateTime lastCachedMessageResendTime;
         /// <summary>
         /// Number of seconds to retain cachedPackets
         /// </summary>
@@ -93,6 +93,7 @@ namespace ReturnHome.Server.Network
 
             // New network auth session timeouts will always be low.
             //For now hardcode 30 seconds, once we enter world it needs to be like... 2 seconds to ping clients, maybe 60 seconds to disconnect
+            //Maybe this would get set by the session location. Pre-memory dump = 30 seconds, memory dump > is 2 seconds
             TimeoutTick = DateTime.UtcNow.AddSeconds(30000).Ticks;
 
             for (int i = 0; i < currentBundles.Length; i++)
@@ -102,7 +103,7 @@ namespace ReturnHome.Server.Network
             }
         }
 
-        
+
         /// <summary>
         /// Enequeues a GameMessage for sending to this client.
         /// This may be called from many threads.
@@ -142,7 +143,7 @@ namespace ReturnHome.Server.Network
                 packetQueue.Enqueue(packet);
             }
         }
-        
+
         /// <summary>
         /// Prunes the cachedPackets dictionary
         /// Checks if we should send the current bundle and then flushes all pending packets.
@@ -152,10 +153,10 @@ namespace ReturnHome.Server.Network
             if (isReleased) // Session has been removed
                 return;
 
-            if (DateTime.UtcNow - lastCachedPacketPruneTime > cachedPacketPruneInterval)
+            if (DateTime.UtcNow - lastCachedMessageResendTime > cachedMessageResendInterval)
             {
-                //Console.WriteLine("Pruning packets");
-                //PruneCachedPackets();
+                Console.WriteLine("Checking Messages for resend");
+                CachedMessageResend();
             }
 
             for (int i = 0; i < currentBundles.Length; i++)
@@ -207,20 +208,19 @@ namespace ReturnHome.Server.Network
             FlushPackets();
         }
 
-        /*
-        private void PruneCachedPackets()
+        private void CachedMessageResend()
         {
-            lastCachedPacketPruneTime = DateTime.UtcNow;
-
-            var currentTime = (ushort)Timer.PortalYearTicks;
-
+            lastCachedMessageResendTime = DateTime.UtcNow;
+            var currentTime = DateTime.UtcNow;
             // Make sure our comparison still works when ushort wraps every 18.2 hours.
-            var removalList = cachedPackets.Values.Where(x => (currentTime >= x.EQOAHeader.Time ? currentTime : currentTime + ushort.MaxValue) - x.Header.Time > cachedPacketRetentionTime);
+            var resendList = cachedMessages.Values.Where(x => DateTime.UtcNow - x.Time > cachedMessageResendInterval);
 
-            foreach (var packet in removalList)
-                cachedPackets.TryRemove(packet.Header.Sequence, out _);
+            foreach (ServerMessage s in resendList)
+            {
+                //Do work to resend these messages
+                Console.WriteLine("Doing work to resend Messages...");
+            }
         }
-        */
 
         // This is called from ConnectionListener.OnDataReceieve()->Session.ProcessPacket()->This
         /// <summary>
@@ -229,7 +229,7 @@ namespace ReturnHome.Server.Network
         /// <param name="packet">The ClientPacket to process.</param>
         public void ProcessPacket(ClientPacket packet)
         {
-			//Develop a way to see if session has been removed/disconnected
+            //Develop a way to see if session has been removed/disconnected
             if (isReleased) // Session has been removed
                 return;
 
@@ -241,13 +241,13 @@ namespace ReturnHome.Server.Network
                 session.Terminate(SessionTerminationReason.PacketHeaderDisconnect);
                 return;
             }
-			
-			//If packet packet# is less then expected packet#, let's drop it. 
-			//Packet ordering is not gauranteed and messages that get recent have a new packet#, implying only messages are reliable
+
+            //If packet packet# is less then expected packet#, let's drop it. 
+            //Packet ordering is not gauranteed and messages that get recent have a new packet#, implying only messages are reliable
             var desiredSeq = lastReceivedPacketSequence + 1;
             if (packet.Header.ClientBundleNumber < desiredSeq)
             {
-				//Delayed/lost packet, drop it
+                //Delayed/lost packet, drop it
                 return;
             }
 
@@ -262,7 +262,7 @@ namespace ReturnHome.Server.Network
             //CheckOutOfOrderPackets();
         }
 
-        
+
         const uint MaxNumNakSeqIds = 115; //464 + header = 484;  (464 - 4) / 4
 
         private DateTime LastRequestForRetransmitTime = DateTime.MinValue;
@@ -281,7 +281,7 @@ namespace ReturnHome.Server.Network
                 packet.Header.HasBundleFlag(PacketBundleFlags.ProcessReport) || packet.Header.HasBundleFlag(PacketBundleFlags.ProcessAll))
             {
                 AcknowledgeSequence(packet.Header.ClientMessageAck);
-				
+
             }
 
             // This should be set on the first packet to the server indicating the client is logging in.
@@ -322,12 +322,6 @@ namespace ReturnHome.Server.Network
                 if (message.Header.MessageType == (byte)MessageType.ReliableMessage || message.Header.MessageType == (byte)MessageType.PingMessage)
                     sendAck = true;
             }
-                
-
-            //After done processing messages, set session ack flag
-            //Update the last received sequence.
-            //if (packet.Header.Sequence != 0 && (packet.Header.Flags != PacketHeaderFlags.AckSequence))
-                //lastReceivedPacketSequence = packet.Header.Sequence;
         }
 
         /// <summary>
@@ -339,11 +333,11 @@ namespace ReturnHome.Server.Network
             //packetLog.DebugFormat("[{0}] Processing fragment {1}", session.LoggingIdentifier, fragment.Header.Sequence);
 
             ClientMessage message = null;
-			
+
             message = new ClientMessage(packetMessage.Data);
 
             // If message is not null, we have a complete message to handle
-			// when would it be null...?
+            // when would it be null...?
             if (message != null)
             {
                 // First check if this message is the next sequence, if it is not, add it to our outOfOrderMessages
@@ -360,7 +354,7 @@ namespace ReturnHome.Server.Network
                 }
             }
         }
-        
+
         /// <summary>
         /// Handles a ClientMessage by calling InboundMessageManager
         /// </summary>
@@ -371,7 +365,7 @@ namespace ReturnHome.Server.Network
             InboundMessageManager.HandleClientMessage(message, session);
             lastReceivedMessageSequence++;
         }
-        
+
         /// <summary>
         /// Checks for received messages from Client that may be out of order, and if order has resumed, process them
         /// </summary>
@@ -382,89 +376,6 @@ namespace ReturnHome.Server.Network
                 HandleMessages(message);
             }
         }
-        /*
-        //private List<EchoStamp> EchoStamps = new List<EchoStamp>();
-
-        private static int EchoLogInterval = 5;
-        private static int EchoInterval = 10;
-        private static float EchoThreshold = 2.0f;
-        private static float DiffThreshold = 0.01f;
-
-        private float lastClientTime;
-        private DateTime lastServerTime;
-
-        private double lastDiff;
-        private int echoDiff;
-        
-        private void VerifyEcho(float clientTime)
-        {
-            if (session.Player == null || session.logOffRequestTime != DateTime.MinValue)
-                return;
-
-            var serverTime = DateTime.UtcNow;
-
-            if (lastClientTime == 0)
-            {
-                lastClientTime = clientTime;
-                lastServerTime = serverTime;
-                return;
-            }
-
-            var serverTimeDiff = serverTime - lastServerTime;
-            var clientTimeDiff = clientTime - lastClientTime;
-
-            var diff = Math.Abs(serverTimeDiff.TotalSeconds - clientTimeDiff);
-
-            if (diff > EchoThreshold && diff - lastDiff > DiffThreshold)
-            {
-                lastDiff = diff;
-                echoDiff++;
-
-                if (echoDiff >= EchoLogInterval)
-                    log.Warn($"{session.Player.Name} - TimeSync error: {echoDiff} (diff: {diff})");
-
-                if (echoDiff >= EchoInterval)
-                {
-                    log.Error($"{session.Player.Name} - disconnected for speedhacking");
-
-                    var actionChain = new ActionChain();
-                    actionChain.AddAction(session.Player, () =>
-                    {
-                        //session.Network.EnqueueSend(new GameMessageBootAccount(session));
-                        session.Network.EnqueueSend(new GameMessageSystemChat($"TimeSync: client speed error", ChatMessageType.Broadcast));
-                        session.LogOffPlayer();
-
-                        echoDiff = 0;
-                        lastDiff = 0;
-                        lastClientTime = 0;
-
-                    });
-                    actionChain.EnqueueChain();
-                }
-            }
-            else if (echoDiff > 0)
-            {
-                if (echoDiff > EchoLogInterval)
-                    log.Warn($"{session.Player.Name} - Diff: {diff}");
-
-                lastDiff = 0;
-                echoDiff = 0;
-            }
-        }
-
-        //is this special channel
-        private void FlagEcho(float clientTime)
-        {
-            var currentBundleLock = currentBundleLocks[(int)GameMessageGroup.InvalidQueue];
-            lock (currentBundleLock)
-            {
-                var currentBundle = currentBundles[(int)GameMessageGroup.InvalidQueue];
-
-                // Debug.Assert(clientTime == -1f, "Multiple EchoRequests before Flush, potential issue with network logic!");
-                currentBundle.ClientTime = clientTime;
-                currentBundle.EncryptedChecksum = true;
-            }
-        }*/
 
         private void AcknowledgeSequence(ushort messageSequence)
         {
@@ -481,15 +392,13 @@ namespace ReturnHome.Server.Network
             }
         }
 
-        /* this needs to eventually pack up and resend messages, they need to be resent every ~2 seconds untill ack received
+        /* Client can request a message to be resent, eventually this would incorporate that resend method once we figure out how it works.
         private bool Retransmit(ushort sequence)
         {
             if (cachedMessages.TryGetValue(sequence, out var cachedMessage))
             {
-
                 //Need to construct a packet with resend messages I suppose?
                 EnqueueSend(cachedMessage);
-
                 return true;
             }
 
@@ -507,10 +416,9 @@ namespace ReturnHome.Server.Network
             }
             else
                 //log.Error($"Session {session.Network?.ClientId}\\{session.EndPoint} ({session.Account}:{session.Player?.Name}) retransmit requested packet {sequence} not in cache. Cache is empty.");
-
             return false;
         }*/
-        
+
         private void FlushPackets()
         {
             while (packetQueue.TryDequeue(out var packet))
@@ -523,17 +431,15 @@ namespace ReturnHome.Server.Network
             if (sendAck)
                 SendPacket(new ServerPacket());
         }
-        
+
         private void SendPacket(ServerPacket packet)
         {
             Console.WriteLine("Sending Packet...");
             SendPacketRaw(packet);
         }
-        
+
         private void SendPacketRaw(ServerPacket packet)
         {
-
-            
             try
             {
                 var socket = connectionListener.Socket;
@@ -570,7 +476,7 @@ namespace ReturnHome.Server.Network
 
             }
         }
-        
+
         /// <summary>
         /// This function handles turning a bundle of messages (representing all messages accrued in a timeslice),
         /// into 1 or more packets, combining multiple messages into one packet or spliting large message across
@@ -592,7 +498,8 @@ namespace ReturnHome.Server.Network
                     var message = new ServerMessage(thisMessage, ConnectionData.MessageSequence++);
                     //Store resend Messages here since these are not FC types?
                     Console.WriteLine($"Storing message {message.Sequence}");
-                    cachedMessages.TryAdd(message.Sequence, message);
+                    if (!cachedMessages.TryAdd(message.Sequence, message))
+                        Console.WriteLine($"Error Adding Message {message.Sequence} to resend cache...");
                     messages.Add(message);
                 }
 
@@ -673,7 +580,7 @@ namespace ReturnHome.Server.Network
                 EnqueueSend(packet);
             }
         }
-        
+
         private bool isReleased;
 
         /// <summary>

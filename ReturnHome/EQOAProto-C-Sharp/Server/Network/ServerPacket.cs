@@ -69,7 +69,7 @@ namespace ReturnHome.Server.Network
             foreach (PacketMessage message in Messages)
                 DataWriter.Write(message.Data.Span);
 
-            DataWriter.Write(CRC.calculateCRC(Data.GetBuffer().AsSpan()));
+            DataWriter.Write(CRC.calculateCRC(Data.GetBuffer().AsSpan(0, (int)Data.Length)));
             byte[] _buff = Data.GetBuffer();
             return _buff[0..((int)Data.Length)];
         }
