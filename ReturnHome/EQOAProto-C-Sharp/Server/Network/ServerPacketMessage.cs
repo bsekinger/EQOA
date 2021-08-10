@@ -4,11 +4,22 @@ namespace ReturnHome.Server.Network
 {
     public class ServerPacketMessage : PacketMessage
     {
-        public ServerPacketMessage(byte[] data)
+        public ushort Sequence { get; private set; }
+
+        public DateTime Time { get; private set; }
+
+
+        public ServerPacketMessage(byte[] data, ushort sequence)
         {
             Data = data;
+            Time = DateTime.UtcNow;
+            Sequence = sequence;
         }
 
+        public void UpdateTime()
+        {
+            Time = DateTime.UtcNow;
+        }
         /*
         /// <summary>
         /// Returns the Hash32 of the payload added to buffer

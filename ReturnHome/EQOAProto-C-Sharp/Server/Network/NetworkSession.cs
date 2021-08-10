@@ -56,7 +56,7 @@ namespace ReturnHome.Server.Network
         /// ConnectionListener.OnDataReceieve()->Session.HandlePacket()->This.HandlePacket(packet), This path can come from any client or other thinkable object.<para />
         /// WorldManager.UpdateWorld()->Session.Update(lastTick)->This.Update(lastTick)
         /// </summary>
-        private readonly ConcurrentDictionary<ushort /*seq*/, ServerMessage> cachedMessages = new ConcurrentDictionary<ushort /*seq*/, ServerMessage>();
+        private readonly ConcurrentDictionary<ushort /*seq*/, ServerPacketMessage> cachedMessages = new ConcurrentDictionary<ushort /*seq*/, ServerPacketMessage>();
 
         private static readonly TimeSpan cachedMessageResendInterval = TimeSpan.FromSeconds(2);
         private DateTime lastCachedMessageResendTime;
@@ -215,7 +215,7 @@ namespace ReturnHome.Server.Network
             // Make sure our comparison still works when ushort wraps every 18.2 hours.
             var resendList = cachedMessages.Values.Where(x => DateTime.UtcNow - x.Time > cachedMessageResendInterval);
 
-            foreach (ServerMessage s in resendList)
+            foreach (ServerPacketMessage s in resendList)
             {
                 //Do work to resend these messages
                 Console.WriteLine("Doing work to resend Messages...");
@@ -387,7 +387,7 @@ namespace ReturnHome.Server.Network
 
             foreach (var key in removalList)
             {
-                cachedMessages.TryRemove(key, out ServerMessage serverMessage);
+                cachedMessages.TryRemove(key, out ServerPacketMessage serverMessage);
                 Console.WriteLine($"Removed Message #{serverMessage.Sequence}");
             }
         }
@@ -492,92 +492,82 @@ namespace ReturnHome.Server.Network
             {
                 var thisMessage = bundle.Dequeue();
 
-                //If message is not FC type, it uses the sequence number ...Need to consider something to handle unreliables as they use their own message # per channel
-                if (thisMessage.Messagetype != (byte)MessageType.UnreliableMessage)
-                {
-                    var message = new ServerMessage(thisMessage, ConnectionData.MessageSequence++);
-                    //Store resend Messages here since these are not FC types?
-                    Console.WriteLine($"Storing message {message.Sequence}");
-                    if (!cachedMessages.TryAdd(message.Sequence, message))
-                        Console.WriteLine($"Error Adding Message {message.Sequence} to resend cache...");
-                    messages.Add(message);
-                }
-
-                //If message is FC type, does not use message #s
-                else
-                {
-                    var message = new ServerMessage(thisMessage, 0);
-                    messages.Add(message);
-                }
+                //Message sequence numbers don't matter here, just add all of the messages
+                var message = new ServerMessage(thisMessage);
+                messages.Add(message);
             }
-
-            //packetLog.DebugFormat("[{0}] Bundle Fragment Count: {1}", session.LoggingIdentifier, fragments.Count);
 
             // Loop through while we have messages
             while (messages.Count > 0)
             {
-                ServerPacket packet = new ServerPacket();
+                // Create a list to remove completed messages after iterator
+                List<ServerMessage> removeList = new List<ServerMessage>();
+                List<ServerPacketMessage> PacketMessages = new();
 
-                int availableSpace = ServerPacket.MaxPacketSize;
-
-                // Pull first message and see if it is a large one
-                var firstMessage = messages.FirstOrDefault();
-                if (firstMessage != null)
+                foreach (ServerMessage message in messages)
                 {
-                    // If a large message send only this one, filling the whole packet
-                    if (firstMessage.DataRemaining >= availableSpace)
+                    //Process unreliable message seperately, does not have a sequence #
+                    if (message.Message.Messagetype == 0xFC)
                     {
-                        //packetLog.DebugFormat("[{0}] Sending large fragment", session.LoggingIdentifier);
-                        ServerPacketMessage spf = firstMessage.GetNextFragment();
-                        packet.Messages.Add(spf);
-                        availableSpace -= spf.Length;
-                        if (firstMessage.DataRemaining <= 0)
-                            messages.Remove(firstMessage);
+                        //packetLog.DebugFormat("[{0}] Sending tail fragment", session.LoggingIdentifier);
+                        ServerPacketMessage spf = message.GetNextMessage(0);
+                        PacketMessages.Add(spf);
+                        //Add to removeList
+                        removeList.Add(message);
+                        continue;
                     }
 
-                    // Create a list to remove completed messages after iterator
-                    List<ServerMessage> removeList = new List<ServerMessage>();
-
-                    foreach (ServerMessage message in messages)
+                    //Reliable type message
+                    while (true)
                     {
-                        bool fragmentSkipped = false;
-
-                        // Is this a large message and does it have a tail that needs sending?
-                        if (!message.TailSent && availableSpace >= message.TailSize)
+                        
+                        //Do some math to break the message down
+                        for ( int i = 0; i < (Math.Ceiling((double)message.DataLength / PacketMessage.MaxMessageSize)); i++)
                         {
                             //packetLog.DebugFormat("[{0}] Sending tail fragment", session.LoggingIdentifier);
-                            ServerPacketMessage spf = message.GetTailFragment();
-                            packet.Messages.Add(spf);
-                            availableSpace -= spf.Length;
+                            ServerPacketMessage spf = message.GetNextMessage(ConnectionData.MessageSequence++);
+                            PacketMessages.Add(spf);
+
+                            //Store resend Messages here since these are not FC types?
+                            Console.WriteLine($"Storing message {message.Sequence}");
+                            if (!cachedMessages.TryAdd(spf.Sequence, spf))
+                                Console.WriteLine($"Error Adding Message {message.Sequence} to resend cache...");
                         }
 
-                        // Otherwise will this message fit in the remaining space?
-                        else if (availableSpace >= message.NextSize)
+                        removeList.Add(message);
+                        //Should be done processing message, break out
+                        break;
+                    }
+                }
+
+                // Remove all completed messages
+                messages.RemoveAll(x => removeList.Contains(x));
+
+                //Process messages to send out
+                while (PacketMessages.Count > 0)
+                {
+                    //Create a packet to hold our message('s)
+                    ServerPacket packet = new ServerPacket();
+                    List<ServerPacketMessage> messageRemoveList = new();
+                    int availableSpace = ServerPacket.MaxPacketSize;
+
+                    foreach( ServerPacketMessage message in PacketMessages)
+                    {
+                        if (availableSpace >= message.Length)
                         {
-                            //packetLog.DebugFormat("[{0}] Sending small message", session.LoggingIdentifier);
-                            ServerPacketMessage spf = message.GetNextFragment();
-                            packet.Messages.Add(spf);
-                            availableSpace -= spf.Length;
+                            packet.Messages.Add(message);
+                            availableSpace -= message.Length;
+                            messageRemoveList.Add(message);
                         }
 
                         else
-                            fragmentSkipped = true;
-
-                        // If message is out of data, set to remove it
-                        if (message.DataRemaining <= 0)
-                            removeList.Add(message);
-
-                        // UIQueue messages must go out in order. Otherwise, you might see an NPC's tells in an order that doesn't match their defined emotes.
-                        if (fragmentSkipped && group == GameMessageGroup.UIQueue)
                             break;
                     }
 
+                    EnqueueSend(packet);
                     // Remove all completed messages
-                    messages.RemoveAll(x => removeList.Contains(x));
+                    PacketMessages.RemoveAll(x => messageRemoveList.Contains(x));
                 }
-
-                //Always writemessage header information to server packet
-                EnqueueSend(packet);
             }
         }
 

@@ -14,13 +14,11 @@ namespace ReturnHome.Server.Network
 
         private byte[] data;
 
-        public ushort Sequence { get; set; }
+        public ushort Sequence { get; private set; }
 
         public ushort Index { get; set; }
 
         public ushort Count { get; set; }
-
-        public DateTime Time { get; private set; }
 
         public int DataLength => (int)Message.Data.Length;
 
@@ -41,39 +39,24 @@ namespace ReturnHome.Server.Network
 
         public bool TailSent { get; private set; }
 
-        public ServerMessage(GameMessage message, ushort sequence)
+        public ServerMessage(GameMessage message)
         {
             Message = message;
-            Time = DateTime.UtcNow;
             DataRemaining = DataLength;
-            Sequence = sequence;
             Count = (ushort)(Math.Ceiling((double)DataLength / PacketMessage.MaxMessageSize));
             Console.WriteLine($"{Count} expected packets from message");
             Index = 0;
-            if (Count == 1)
-                TailSent = true;
             //packetLog.DebugFormat("Sequence {0}, Count {1}, DataRemaining {2}", sequence, Count, DataRemaining);
         }
 
-        public void UpdateTime()
+        public ServerPacketMessage GetNextMessage(ushort sequence)
         {
-            Time = DateTime.UtcNow;
+            return CreateServerFragment(Index++, sequence);
         }
 
-        public ServerPacketMessage GetTailFragment()
+        private ServerPacketMessage CreateServerFragment(ushort Index, ushort sequence)
         {
-            var Index = (ushort)(Count - 1);
-            TailSent = true;
-            return CreateServerFragment(Index);
-        }
 
-        public ServerPacketMessage GetNextFragment()
-        {
-            return CreateServerFragment(Index++);
-        }
-
-        private ServerPacketMessage CreateServerFragment(ushort Index)
-        {
             //packetLog.DebugFormat("Creating ServerFragment for Index {0}", Index);
             if (Index >= Count)
                 throw new ArgumentOutOfRangeException("Index", Index, "Passed Index is greater then computed Count");
@@ -92,20 +75,22 @@ namespace ReturnHome.Server.Network
             if (DataRemaining < dataToSend)
                 throw new InvalidOperationException("More data to send then data remaining!");
 
+            Sequence = sequence;
+
             // Read data starting at position reading dataToSend bytes
             Message.Data.Seek(position, SeekOrigin.Begin);
 
             ProcessMessageTypeAndHeader(dataToSend);
 
             // Build ServerPacketFragment structure
-            ServerPacketMessage fragment = new ServerPacketMessage(data);
-            fragment.Header.MessageNumber = Sequence;
-            fragment.Header.Count = Count;
-            fragment.Header.Index = Index;
+            ServerPacketMessage message = new ServerPacketMessage(data, Sequence);
+            message.Header.MessageNumber = Sequence;
+            message.Header.Count = Count;
+            message.Header.Index = Index;
 
             DataRemaining -= dataToSend;
             //packetLog.DebugFormat("Done creating ServerFragment for Index {0}. After reading {1} DataRemaining {2}", Index, dataToSend, DataRemaining);
-            return fragment;
+            return message;
         }
 
         private void ProcessMessageTypeAndHeader(int dataToSend)
