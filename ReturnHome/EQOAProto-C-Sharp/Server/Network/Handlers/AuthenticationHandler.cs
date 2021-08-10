@@ -23,16 +23,18 @@ namespace ReturnHome.Server.Network.Handlers
 
         public static void HandleLoginRequest(ClientPacket packet, Session session)
         {
+            GameDiscVersion version = new GameDiscVersion(packet.Messages[0]);
             try
             {
                 //Process GameDisc first
-                if (!(new GameDiscVersion(packet.Messages[0]).pass))
+                if (!(version.pass))
                 {
                     //Drop packet and fail if this fails
                 }
 
                 //Process Account verification
                 PacketInboundLoginRequest loginRequest = new PacketInboundLoginRequest(packet.Messages[1]);
+                session.Version = version.Version;
 
                 if (loginRequest.AccountName.Length > 16 || !loginRequest.EQOACheck)
                 {
@@ -95,7 +97,7 @@ namespace ReturnHome.Server.Network.Handlers
                 }
             }
             */
-            var GameVersion = new GameDiscVersion(0x25);
+            var GameVersion = new GameDiscVersion(session.Version);
             session.Network.EnqueueSend(GameVersion);
 
             

@@ -234,7 +234,7 @@ namespace ReturnHome.Server.Network.Managers
 
         public static void RemoveSession(Session session)
         {
-            if (SessionHash.TryRemove(session))
+            if(SessionHash.TryRemove(session))
                 Console.WriteLine("Session Successfully removed");
             else
                 Console.WriteLine("Session not removed???");

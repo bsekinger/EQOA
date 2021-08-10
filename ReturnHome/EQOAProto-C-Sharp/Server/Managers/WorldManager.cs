@@ -2,9 +2,9 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading;
-
-
+using System.Timers;
 using ReturnHome.Server.Entity.Actions;
+using ReturnHome.Server.Network.GameMessages.Messages;
 using ReturnHome.Server.Network.Managers;
 
 namespace ReturnHome.Server.Managers
@@ -44,6 +44,11 @@ namespace ReturnHome.Server.Managers
             });
             thread.Name = "World Manager";
             thread.Priority = ThreadPriority.AboveNormal;
+            
+            System.Timers.Timer t = new(5000);
+            t.AutoReset = true;
+            t.Elapsed += new ElapsedEventHandler((_, _) => ServerListManager.DistributeServerList());
+            t.Start();
             thread.Start();
             //log.DebugFormat("ServerTime initialized to {0}", Timers.WorldStartLoreTime);
             //log.DebugFormat($"Current maximum allowed sessions: {ConfigManager.Config.Server.Network.MaximumAllowedSessions}");
@@ -52,6 +57,7 @@ namespace ReturnHome.Server.Managers
             //if (WorldStatus == WorldStatusState.Closed)
             //log.Info($"To open world to players, use command: world open");
         }
+
         /*
         internal static void Open(Player player)
         {
@@ -65,9 +71,7 @@ namespace ReturnHome.Server.Managers
             var msg = "World is now closed";
             if (bootPlayers)
                 msg += ", and booting all online players.";
-
             PlayerManager.BroadcastToAuditChannel(player, msg);
-
             if (bootPlayers)
                 PlayerManager.BootAllPlayers();
         }
@@ -75,18 +79,15 @@ namespace ReturnHome.Server.Managers
         public static void PlayerEnterWorld(Session session, Character character)
         {
             var offlinePlayer = PlayerManager.GetOfflinePlayer(character.Id);
-
             if (offlinePlayer == null)
             {
                 log.Error($"PlayerEnterWorld requested for character.Id 0x{character.Id:X8} not found in PlayerManager OfflinePlayers.");
                 return;
             }
-
             var start = DateTime.UtcNow;
             DatabaseManager.Shard.GetPossessedBiotasInParallel(character.Id, biotas =>
             {
                 log.Debug($"GetPossessedBiotasInParallel for {character.Name} took {(DateTime.UtcNow - start).TotalMilliseconds:N0} ms");
-
                 ActionQueue.EnqueueAction(new ActionEventDelegate(() => DoPlayerEnterWorld(session, character, offlinePlayer.Biota, biotas)));
             });
         }
@@ -94,9 +95,7 @@ namespace ReturnHome.Server.Managers
         private static void DoPlayerEnterWorld(Session session, Character character, Biota playerBiota, PossessedBiotas possessedBiotas)
         {
             Player player;
-
             Player.HandleNoLogLandblock(playerBiota, out var playerLoggedInOnNoLogLandblock);
-
             var stripAdminProperties = false;
             var addAdminProperties = false;
             var addSentinelProperties = false;
@@ -130,16 +129,13 @@ namespace ReturnHome.Server.Managers
                     }
                 }
             }
-
             if (playerBiota.WeenieType == WeenieType.Admin)
                 player = new Admin(playerBiota, possessedBiotas.Inventory, possessedBiotas.WieldedItems, character, session);
             else if (playerBiota.WeenieType == WeenieType.Sentinel)
                 player = new Sentinel(playerBiota, possessedBiotas.Inventory, possessedBiotas.WieldedItems, character, session);
             else
                 player = new Player(playerBiota, possessedBiotas.Inventory, possessedBiotas.WieldedItems, character, session);
-
             session.SetPlayer(player);
-
             if (stripAdminProperties) // continue stripping properties
             {
                 player.CloakStatus = CloakStatus.Undef;
@@ -154,21 +150,16 @@ namespace ReturnHome.Server.Managers
                 player.IgnorePortalRestrictions = false;
                 player.SafeSpellComponents = false;
                 player.ReportCollisions = true;
-
-
                 player.ChangesDetected = true;
                 player.CharacterChangesDetected = true;
             }
-
             if (addSentinelProperties || addAdminProperties) // continue restoring properties to default
             {
                 WorldObject weenie;
-
                 if (addAdminProperties)
                     weenie = Factories.WorldObjectFactory.CreateWorldObject(DatabaseManager.World.GetCachedWeenie("admin"), new ACE.Entity.ObjectGuid(ACE.Entity.ObjectGuid.Invalid.Full));
                 else
                     weenie = Factories.WorldObjectFactory.CreateWorldObject(DatabaseManager.World.GetCachedWeenie("sentinel"), new ACE.Entity.ObjectGuid(ACE.Entity.ObjectGuid.Invalid.Full));
-
                 if (weenie != null)
                 {
                     player.CloakStatus = CloakStatus.Off;
@@ -179,13 +170,10 @@ namespace ReturnHome.Server.Managers
                     player.ChannelsAllowed = (Channel?)weenie.GetProperty(ACE.Entity.Enum.Properties.PropertyInt.ChannelsAllowed);
                     player.Invincible = false;
                     player.Cloaked = false;
-
-
                     player.ChangesDetected = true;
                     player.CharacterChangesDetected = true;
                 }
             }
-
             // If the client is missing a location, we start them off in the starter town they chose
             if (session.Player.Location == null)
             {
@@ -194,20 +182,15 @@ namespace ReturnHome.Server.Managers
                 else
                     session.Player.Location = new Position(0xA9B40019, 84, 7.1f, 94, 0, 0, -0.0784591f, 0.996917f);  // ultimate fallback
             }
-
             session.Player.PlayerEnterWorld();
-
             var success = LandblockManager.AddObject(session.Player, true);
             if (!success)
             {
                 // send to lifestone, or fallback location
                 var fixLoc = session.Player.Sanctuary ?? new Position(0xA9B40019, 84, 7.1f, 94, 0, 0, -0.0784591f, 0.996917f);
-
                 log.Error($"WorldManager.DoPlayerEnterWorld: failed to spawn {session.Player.Name}, relocating to {fixLoc.ToLOCString()}");
-
                 session.Player.Location = new Position(fixLoc);
                 LandblockManager.AddObject(session.Player, true);
-
                 var actionChain = new ActionChain();
                 actionChain.AddDelaySeconds(5.0f);
                 actionChain.AddAction(session.Player, () =>
@@ -217,7 +200,6 @@ namespace ReturnHome.Server.Managers
                 });
                 actionChain.EnqueueChain();
             }
-
             // These warnings are set by DDD_InterrogationResponse
             if ((session.DatWarnCell || session.DatWarnLanguage || session.DatWarnPortal) && PropertyManager.GetBool("show_dat_warning").Item)
             {
@@ -225,11 +207,9 @@ namespace ReturnHome.Server.Managers
                 var chatMsg = new GameMessageSystemChat(msg, ChatMessageType.System);
                 session.Network.EnqueueSend(chatMsg);
             }
-
             var popup_header = PropertyManager.GetString("popup_header").Item;
             var popup_motd = PropertyManager.GetString("popup_motd").Item;
             var popup_welcome = PropertyManager.GetString("popup_welcome").Item;
-
             if (character.TotalLogins <= 1)
             {
                 session.Network.EnqueueSend(new GameEventPopupString(session, AppendLines(popup_header, popup_motd, popup_welcome)));
@@ -238,14 +218,11 @@ namespace ReturnHome.Server.Managers
             {
                 session.Network.EnqueueSend(new GameEventPopupString(session, AppendLines(popup_header, popup_motd)));
             }
-
             var info = "Welcome to Asheron's Call\n  powered by ACEmulator\n\nFor more information on commands supported by this server, type @acehelp\n";
             session.Network.EnqueueSend(new GameMessageSystemChat(info, ChatMessageType.Broadcast));
-
             var server_motd = PropertyManager.GetString("server_motd").Item;
             if (!string.IsNullOrEmpty(server_motd))
                 session.Network.EnqueueSend(new GameMessageSystemChat($"{server_motd}\n", ChatMessageType.Broadcast));
-
             if (playerLoggedInOnNoLogLandblock) // see http://acpedia.org/wiki/Mount_Elyrii_Hive
                 session.Network.EnqueueSend(new GameMessageSystemChat("The currents of portal space cannot return you from whence you came. Your previous location forbids login.", ChatMessageType.Broadcast));
         }
@@ -256,7 +233,6 @@ namespace ReturnHome.Server.Managers
             foreach (var line in lines)
                 if (!string.IsNullOrEmpty(line))
                     result += $"{line}\n";
-
             return Regex.Replace(result, "\n$", "");
         }
 
@@ -272,7 +248,6 @@ namespace ReturnHome.Server.Managers
             EnqueueAction(new ActionEventDelegate(() =>
             {
                 player.Teleport(newPosition, fromPortal);
-
                 if (actionToFollowUpWith != null)
                     EnqueueAction(actionToFollowUpWith);
             }));
@@ -282,9 +257,9 @@ namespace ReturnHome.Server.Managers
         {
             ActionQueue.EnqueueAction(action);
         }
-
         //private static readonly RateLimiter updateGameWorldRateLimiter = new RateLimiter(60, TimeSpan.FromSeconds(1));
         */
+
         /// <summary>
         /// Manages updating all entities on the world.
         ///  - Server-side command-line commands are handled in their own thread.
@@ -295,7 +270,6 @@ namespace ReturnHome.Server.Managers
         private static void UpdateWorld()
         {
             //log.DebugFormat("Starting UpdateWorld thread");
-
             WorldActive = true;
             var worldTickTimer = new Stopwatch();
 
@@ -324,30 +298,23 @@ namespace ReturnHome.Server.Managers
                 /*ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.PlayerManager_Tick);
                 PlayerManager.Tick();
                 ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.PlayerManager_Tick);
-
                 ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.NetworkManager_InboundClientMessageQueueRun);*/
                 NetworkManager.InboundMessageQueue.RunActions();
                 /*ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.NetworkManager_InboundClientMessageQueueRun);
-
                 // This will consist of PlayerEnterWorld actions, as well as other game world actions that require thread safety
                 ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.actionQueue_RunActions);
                 ActionQueue.RunActions();
                 ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.actionQueue_RunActions);
-
                 ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.DelayManager_RunActions);
                 DelayManager.RunActions();
                 ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.DelayManager_RunActions);
-
                 ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.UpdateGameWorld);
                 var gameWorldUpdated = UpdateGameWorld();
                 ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.UpdateGameWorld);
-
                 ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.NetworkManager_DoSessionWork);*/
                 int sessionCount = NetworkManager.DoSessionWork();
                 /*ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.NetworkManager_DoSessionWork);
-
                 ServerPerformanceMonitor.Tick();
-
                 // We only relax the CPU if our game world is able to update at the target rate.
                 // We do not sleep if our game world just updated. This is to prevent the scenario where our game world can't keep up. We don't want to add further delays.
                 // If our game world is able to keep up, it will not be updated on most ticks. It's on those ticks (between updates) that we will relax the CPU.*/
@@ -368,22 +335,15 @@ namespace ReturnHome.Server.Managers
         {
             if (updateGameWorldRateLimiter.GetSecondsToWaitBeforeNextEvent() > 0)
                 return false;
-
             updateGameWorldRateLimiter.RegisterEvent();
-
             ServerPerformanceMonitor.RestartCumulativeEvents();
             ServerPerformanceMonitor.RestartEvent(ServerPerformanceMonitor.MonitorType.UpdateGameWorld_Entire);
-
             LandblockManager.Tick(Timers.PortalYearTicks);
-
             HouseManager.Tick();
-
             ServerPerformanceMonitor.RegisterEventEnd(ServerPerformanceMonitor.MonitorType.UpdateGameWorld_Entire);
             ServerPerformanceMonitor.RegisterCumulativeEvents();
-
             return true;
         }
-
         /// <summary>
         /// Function to begin ending the operations inside of an active world.
         /// </summary>

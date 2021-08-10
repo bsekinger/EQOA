@@ -45,7 +45,7 @@ namespace ReturnHome.Server.Network
 
             //Write objectID if applicable
             if (session.InstanceID != 0)
-                DataWriter.Write(Utility_Funcs.Technique(session.InstanceID));
+                Utility_Funcs.DoublePack(DataWriter, (int)session.InstanceID);
 
             //Write bundle header
             WriteBundleType(session);
@@ -106,7 +106,7 @@ namespace ReturnHome.Server.Network
             else
                 value |= 0x001000;
 
-            DataWriter.Write(Utility_Funcs.Pack(value));
+            DataWriter.Write7BitEncodedInt((int)value);
         }
 
         private void WriteBundleType(Session session)

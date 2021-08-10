@@ -1,87 +1,83 @@
 ﻿using System;
-
+using System.IO;
+using System.Linq;
 using ReturnHome.Utilities;
 
 namespace ReturnHome.Server.Network
 {
     public class PacketHeader
     {
-        //This is the minimum header size we could encounter, but varies through out the game, up to ~14 bytes
-        public byte HeaderSize { get; set; }
-
         public ushort ClientEndPoint { get; set; }
         public ushort TargetEndPoint { get; set; }
         public uint HeaderData { get; set; }
         public PacketHeaderFlags headerFlags { get; set; }
         public PacketBundleFlags bundleFlags { get; set; }
-        public bool CRCChecksum { get; set; }
+        public bool CRCChecksum { get; set; } = false;
+        public bool RDPReport { get; set; } = false;
+        public bool CancelSession { get; set; } = false;
         public ushort BundleSize { get; set; }
         public uint SessionID { get; set; }
         public uint InstanceID { get; set; }
-		public ushort ClientBundleNumber { get; set; }
-		public ushort ClientBundleAck { get; set; }
-		public ushort ClientMessageAck { get; set; }
+        public ushort ClientBundleNumber { get; set; }
+        public ushort ClientBundleAck { get; set; }
+        public ushort ClientMessageAck { get; set; } 
 
-        public int Unpack(ReadOnlyMemory<byte> buffer, int offset)
+        public void Unpack(BinaryReader buffer, byte[] buffer2)
         {
-            (ClientEndPoint, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-            (TargetEndPoint, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-            (HeaderData, offset) = Utility_Funcs.Unpack(buffer, offset);
-            BundleSize     = (ushort)(HeaderData & 0x7FF);
-            headerFlags    = (PacketHeaderFlags)(HeaderData - BundleSize);
+            ClientEndPoint = buffer.ReadUInt16();
+            TargetEndPoint = buffer.ReadUInt16();
+            HeaderData = (uint)buffer.Read7BitEncodedInt();
+            BundleSize = (ushort)(HeaderData & 0x7FF);
+            headerFlags = (PacketHeaderFlags)(HeaderData - BundleSize);
 
             //Verify packet has instance in header
             if (HasHeaderFlag(PacketHeaderFlags.HasInstance))
-                (SessionID, offset) = BinaryPrimitiveWrapper.GetLEUInt(buffer, offset);
+                SessionID = buffer.ReadUInt32();
 
             //if Client is "remote", means it is not "master" anymore and an additional pack value to read which ties into character instanceID
             if (HasHeaderFlag(PacketHeaderFlags.IsRemote))
-                (InstanceID, offset) = Utility_Funcs.Unpack(buffer, offset);
-			
-			else
-				InstanceID = 0;
-			
-			//Set Header size to Offset, offset at this point should the the header size we need
-			HeaderSize = (byte)offset;
-			
-			//Check if it is a transfer packet
-			if (!(TargetEndPoint == 0xFFFF))
-				//Not Transfer packet, Validate CRC Checksum for packet
-				CRCChecksum = buffer.Span.Slice(buffer.Length - 4, 4).SequenceEqual(CRC.calculateCRC(buffer.Span.Slice(0, buffer.Length - 4)));
-				
-			else
-				return offset;
-
-            byte temp;
-			//Read Bundle Type, needs abit of a work around....
-			(temp, offset) = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
-			bundleFlags = (PacketBundleFlags)temp;
-
-            (ClientBundleNumber, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-			if (HasBundleFlag(PacketBundleFlags.NewProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) || 
-			    HasBundleFlag(PacketBundleFlags.ProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessAll))
-			{
-				(ClientBundleAck, offset)	 = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-				(ClientMessageAck, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-			}
-
-            //This would indicate it's the end of the apcket if true, no messages
-            if ((offset + 4) == buffer.Length)
-                return offset + 4;
+                InstanceID = (uint)Utility_Funcs.DoubleUnpack(buffer);
 
             else
-                return offset;
+                InstanceID = 0;
+
+            if (HasHeaderFlag(PacketHeaderFlags.ResetConnection))
+                //SessionID is duplicated with resetconnection header, indicates to drop session
+                if (SessionID == buffer.ReadUInt32())
+                {
+                    CancelSession = true;
+                    return;
+
+                }
+
+
+
+            //Check if it is a transfer packet
+            if (!(TargetEndPoint == 0xFFFF))
+                //Not Transfer packet, Validate CRC Checksum for packet
+                CRCChecksum = buffer2[(buffer2.Length - 4)..buffer2.Length].SequenceEqual(CRC.calculateCRC(buffer2[0..(buffer2.Length - 4)].AsSpan()));
+
+            else
+                //Eventually do transfers here some how
+                return;
+
+            //Read Bundle Type, needs abit of a work around....
+            bundleFlags = (PacketBundleFlags)buffer.ReadByte();
+
+            ClientBundleNumber = buffer.ReadUInt16();
+
+
+            if (HasBundleFlag(PacketBundleFlags.NewProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||
+                HasBundleFlag(PacketBundleFlags.ProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessAll))
+            {
+                ClientBundleAck = buffer.ReadUInt16();
+                ClientMessageAck = buffer.ReadUInt16();
+                RDPReport = true;
+            }
         }
 
         public bool HasHeaderFlag(PacketHeaderFlags HeaderFlags) { return (HeaderFlags & headerFlags) == HeaderFlags; }
-		
-		public bool HasBundleFlag(PacketBundleFlags BundleFlags) { return (BundleFlags & bundleFlags) == BundleFlags; }
 
-        public void GetHeaderSize(Session session)
-        {
-            //Standard endpoints
-            HeaderSize = 4;
-
-        }
+        public bool HasBundleFlag(PacketBundleFlags BundleFlags) { return bundleFlags == BundleFlags; }
     }
 }

@@ -210,9 +210,7 @@ namespace ReturnHome.Server.Network
 
         private void CachedMessageResend()
         {
-            lastCachedMessageResendTime = DateTime.UtcNow;
-            var currentTime = DateTime.UtcNow;
-            // Make sure our comparison still works when ushort wraps every 18.2 hours.
+
             var resendList = cachedMessages.Values.Where(x => DateTime.UtcNow - x.Time > cachedMessageResendInterval);
 
             foreach (ServerPacketMessage s in resendList)

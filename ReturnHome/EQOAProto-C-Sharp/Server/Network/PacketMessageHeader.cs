@@ -1,5 +1,5 @@
 using System;
-
+using System.IO;
 using ReturnHome.Utilities;
 
 namespace ReturnHome.Server.Network
@@ -15,19 +15,18 @@ namespace ReturnHome.Server.Network
         public int Index { get; set; }
         public bool Split { get; set; }
 
-        public void Unpack(ReadOnlyMemory<byte> buffer, ref int offset)
+        public void Unpack(BinaryReader buffer)
         {
-            byte temp;
             //Read first byte, if it is FF, read an additional byte (Indicates >255byte message
-            (temp, offset) = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
+            byte temp= buffer.ReadByte();
 			if (temp == 0xFF)
 			{
-				(MessageType, offset)   = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
-				(Size, offset)          = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-				(MessageNumber, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-				
-				//Message is split across 2+ packets
-				if (MessageType == 0xFA)
+				MessageType   = buffer.ReadByte();
+                Size          = buffer.ReadUInt16();
+				MessageNumber = buffer.ReadUInt16();
+
+                //Message is split across 2+ packets
+                if (MessageType == 0xFA)
 					Split = true;
 			}
 			
@@ -42,17 +41,15 @@ namespace ReturnHome.Server.Network
                     if (MessageType == 0xFA)
 						Split = true;
 			
-					(Size, offset) = BinaryPrimitiveWrapper.GetLEByte(buffer, offset);
-					
-					//FC type is of an unreliable nature and does not have a message#
-					if (!(MessageType == 0xFC))
-						(MessageNumber, offset) = BinaryPrimitiveWrapper.GetLEUShort(buffer, offset);
-				}
+					Size = buffer.ReadByte();
+
+                    //FC type is of an unreliable nature and does not have a message#
+                    if (!(MessageType == 0xFC))
+						MessageNumber = buffer.ReadUInt16();
+                }
 				
 				//Eventually check for unreliable messages "Character updates" from client
 			}
-
-            return;
         }
     }
 }

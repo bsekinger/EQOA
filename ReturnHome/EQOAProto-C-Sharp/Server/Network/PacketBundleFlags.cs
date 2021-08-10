@@ -3,8 +3,7 @@ using System;
 namespace ReturnHome.Server.Network
 {
 	//Contains bundle header flags along with BundleTypeFlags
-    [Flags]
-    public enum PacketBundleFlags  
+    public enum PacketBundleFlags  : byte
     {
         NewProcessMessages      = 0x00,
 		NewProcessReport        = 0x03,

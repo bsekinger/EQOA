@@ -38,7 +38,7 @@ namespace ReturnHome.Server.Network
                 Socket.Bind(ListenerEndpoint);
                 Listen();
             }
-			
+
             catch (Exception exception)
             {
                 //log.FatalFormat("Network Socket has thrown: {0}", exception.Message);
@@ -60,13 +60,13 @@ namespace ReturnHome.Server.Network
                 EndPoint clientEndPoint = new IPEndPoint(listeningHost, 0);
                 Socket.BeginReceiveFrom(_buffer, 0, _buffer.Length, SocketFlags.None, ref clientEndPoint, OnDataReceive, Socket);
             }
-			
+
             catch (SocketException socketException)
             {
                 //log.DebugFormat("ConnectionListener.Listen() has thrown {0}: {1}", socketException.SocketErrorCode, socketException.Message);
                 Listen();
             }
-			
+
             catch (Exception ex)
             {
                 //log.FatalFormat("ConnectionListener.Listen() has thrown: {0}", exception.Message);
@@ -101,14 +101,12 @@ namespace ReturnHome.Server.Network
 
                 var packet = new ClientPacket();
 
-                Console.WriteLine("Received data from Client");
-
-                if (packet.Unpack(buffer.AsMemory(), dataSize))
+                if (packet.Unpack(buffer, dataSize))
                     NetworkManager.ProcessPacket(this, packet, ipEndpoint);
 
                 packet.ReleaseBuffer();
             }
-			
+
             catch (SocketException socketException)
             {
                 // If we get "Connection has been forcibly closed..." error, just eat the exception and continue on
@@ -120,7 +118,7 @@ namespace ReturnHome.Server.Network
                 {
                     //log.DebugFormat("ConnectionListener.OnDataReceieve() has thrown {0}: {1} from client {2}", socketException.SocketErrorCode, socketException.Message, clientEndPoint != null ? clientEndPoint.ToString() : "Unknown");
                 }
-				
+
                 else
                 {
                     //log.FatalFormat("ConnectionListener.OnDataReceieve() has thrown {0}: {1} from client {2}", socketException.SocketErrorCode, socketException.Message, clientEndPoint != null ? clientEndPoint.ToString() : "Unknown");

@@ -44,7 +44,6 @@ namespace ReturnHome.Server.Network
             Message = message;
             DataRemaining = DataLength;
             Count = (ushort)(Math.Ceiling((double)DataLength / PacketMessage.MaxMessageSize));
-            Console.WriteLine($"{Count} expected packets from message");
             Index = 0;
             //packetLog.DebugFormat("Sequence {0}, Count {1}, DataRemaining {2}", sequence, Count, DataRemaining);
         }
@@ -192,7 +191,7 @@ namespace ReturnHome.Server.Network
             else
             {
                 data = new byte[dataToSend + 2];
-                data[0] = 0xFB;
+                data[0] = 0xFC;
                 data[1] = (byte)(dataToSend);
                 Message.Data.Read(data, 2, dataToSend);
             }

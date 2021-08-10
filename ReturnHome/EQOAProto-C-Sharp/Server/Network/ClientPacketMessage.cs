@@ -1,18 +1,15 @@
 using System;
+using System.IO;
 
 namespace ReturnHome.Server.Network
 {
     public class ClientPacketMessage : PacketMessage
     {
-        public bool Unpack(ReadOnlyMemory<byte> buffer, ref int offset)
+        public bool Unpack(BinaryReader buffer)
         {
-            Header.Unpack(buffer, ref offset);
-
-			if (buffer.Length < (offset + Header.Size))
-				return false;
+            Header.Unpack(buffer);
 			
-            Data = buffer.Slice(offset, Header.Size);
-			offset += Header.Size;
+            Data = new Memory<byte>(buffer.ReadBytes(Header.Size));
             return true;
         }
     }

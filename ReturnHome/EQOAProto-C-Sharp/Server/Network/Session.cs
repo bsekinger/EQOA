@@ -6,6 +6,7 @@ using ReturnHome.Server.Managers;
 using ReturnHome.Server.Network.Enum;
 using ReturnHome.Server.Network.GameEvent.Events;
 using ReturnHome.Server.Network.GameMessages;
+using ReturnHome.Server.Network.GameMessages.Messages;
 using ReturnHome.Server.Network.Managers;
 
 namespace ReturnHome.Server.Network
@@ -34,6 +35,9 @@ namespace ReturnHome.Server.Network
         //Just keep this true by default for now
         public bool hasInstance = true;
 
+        //Game disc being used/version Helps to read/respond to client appropriately
+        public int Version { get; set; } = 0;
+
 
         public SessionState State { get; set; }
 
@@ -49,6 +53,21 @@ namespace ReturnHome.Server.Network
             EndPoint = endPoint;
             InstanceID = instanceID;
             Network = new NetworkSession(this, connectionListener, clientId, serverId);
+
+            //If server initiated, have 2 messages to send client/initiate session
+            if(didServerInitiate)
+            {
+                GameMessage[] gameList = new GameMessage[2];
+
+                var camera1 = new Camera1();
+                gameList[0] = camera1;
+
+                var camera2 = new Camera2();
+                gameList[1] = camera2;
+
+                Network.EnqueueSend(gameList);
+            }
+
         }
 
         public void ProcessPacket(ClientPacket packet)
