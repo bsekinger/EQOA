@@ -6,9 +6,10 @@ using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 using System.Timers;
-
+using ReturnHome.Server.Managers;
 using ReturnHome.Server.Network.Enum;
 using ReturnHome.Server.Network.GameMessages;
+using ReturnHome.Server.Network.GameMessages.Messages;
 using ReturnHome.Server.Network.Handlers;
 //using ReturnHome.Server.Network.Handlers;
 using ReturnHome.Server.Network.Managers;
@@ -155,7 +156,6 @@ namespace ReturnHome.Server.Network
 
             if (DateTime.UtcNow - lastCachedMessageResendTime > cachedMessageResendInterval)
             {
-                Console.WriteLine("Checking Messages for resend");
                 CachedMessageResend();
             }
 
@@ -199,7 +199,7 @@ namespace ReturnHome.Server.Network
                 // and all future writes from other threads will go to the new bundle
                 if (bundleToSend != null)
                 {
-                    Console.WriteLine("Sending bundle...");
+                    //Console.WriteLine("Sending bundle...");
                     SendBundle(bundleToSend, group);
                     nextSend = DateTime.UtcNow.AddMilliseconds(minimumTimeBetweenBundles);
                 }
@@ -210,13 +210,35 @@ namespace ReturnHome.Server.Network
 
         private void CachedMessageResend()
         {
+            lastCachedMessageResendTime = DateTime.UtcNow;
+            var currentTime = DateTime.UtcNow;
+            // Make sure our comparison still works when ushort wraps every 18.2 hours.
+            var resendList = cachedMessages.Values.Where(x => DateTime.UtcNow - x.Time > cachedMessageResendInterval).ToList();
 
-            var resendList = cachedMessages.Values.Where(x => DateTime.UtcNow - x.Time > cachedMessageResendInterval);
-
-            foreach (ServerPacketMessage s in resendList)
+            //Process messages to send out
+            while (resendList.Count > 0)
             {
-                //Do work to resend these messages
-                Console.WriteLine("Doing work to resend Messages...");
+                //Create a packet to hold our message('s)
+                ServerPacket packet = new ServerPacket();
+                List<ServerPacketMessage> messageRemoveList = new();
+                int availableSpace = ServerPacket.MaxPacketSize;
+
+                foreach (ServerPacketMessage message in resendList)
+                {
+                    if (availableSpace >= message.Length)
+                    {
+                        packet.Messages.Add(message);
+                        availableSpace -= message.Length;
+                        messageRemoveList.Add(message);
+                    }
+
+                    else
+                        break;
+                }
+
+                EnqueueSend(packet);
+                // Remove all completed messages
+                resendList.RemoveAll(x => messageRemoveList.Contains(x));
             }
         }
 
@@ -234,7 +256,7 @@ namespace ReturnHome.Server.Network
             //packetLog.DebugFormat("[{0}] Processing packet {1}", session.LoggingIdentifier, packet.Header.Sequence);
             //NetworkStatistics.C2S_Packets_Aggregate_Increment();
 
-            if (packet.Header.HasHeaderFlag(PacketHeaderFlags.ResetConnection))
+            if (packet.Header.CancelSession)
             {
                 session.Terminate(SessionTerminationReason.PacketHeaderDisconnect);
                 return;
@@ -275,11 +297,43 @@ namespace ReturnHome.Server.Network
             //packetLog.DebugFormat("[{0}] Handling packet {1}", session.LoggingIdentifier, packet.Header.Sequence);
 
             // Received an rudp report, flush out old packet up to ack
-            if (packet.Header.HasBundleFlag(PacketBundleFlags.NewProcessReport) || packet.Header.HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||
-                packet.Header.HasBundleFlag(PacketBundleFlags.ProcessReport) || packet.Header.HasBundleFlag(PacketBundleFlags.ProcessAll))
+            if (packet.Header.RDPReport)
             {
                 AcknowledgeSequence(packet.Header.ClientMessageAck);
 
+                //Perform Server List actions here
+                /*
+                How do we know this is what we need?
+                Client header information etc doesn't seem to change/indicate we should be here... So we go
+                on the assumption that if client's endpoint == client's instanceid & 0x0000FFFF, it should be time to send the server list
+                */
+                if ((ConnectionData.MessageSequence == 0x02) && (ClientId == (session.SessionID & 0xFFFF)))
+                {
+                    //Console.WriteLine("Adding session to Server List Queue");
+                    ServerListManager.AddSession(session);
+                }
+
+                //We are at the point we are starting a master session with client
+                else if ((ConnectionData.MessageSequence == 0x02) && (ClientId == ((session.SessionID - 1) & 0xFFFF)))
+                {
+                    //Need to randomly Generate the InstanceID some how, hardcoded for now...
+                    Session newSession = new Session(connectionListener, session.EndPoint, Utilities.DNP3Creation.DNP3Session(), 220760, ClientId, ServerId, true);
+
+                    //Try to add session to List, if it fails drop the session/packet, or process if it passes
+                    if (NetworkManager.SessionHash.TryAdd(newSession))
+                    {
+                        //Session has been added, trigger communication to client inside new session and let current session die out?
+                        Console.WriteLine("Master Session created");
+                    }
+                    //What do we do if it fails...? Logging at minimum
+                }
+
+                else if ((lastReceivedMessageSequence == 0x00) && session.didServerInitiate)
+                {
+                    CharacterList charList = new CharacterList(session);
+                    EnqueueSend(charList);
+                    return;
+                }
             }
 
             // This should be set on the first packet to the server indicating the client is logging in.
@@ -307,12 +361,10 @@ namespace ReturnHome.Server.Network
                 {
                     if (message.Header.MessageNumber == lastReceivedMessageSequence + 1)
                     {
-                        Console.WriteLine("Process Ping Request");
+                        //Console.WriteLine("Process Ping Request");
                         //Process Ping
                         lastReceivedMessageSequence++;
                     }
-                    else
-                        Console.WriteLine("Ping Request out of order");
                 }
                 else
                     ProcessMessage(message);
@@ -359,7 +411,6 @@ namespace ReturnHome.Server.Network
         /// <param name="message">ClientMessage to process</param>
         private void HandleMessages(ClientMessage message)
         {
-            Console.WriteLine("Here");
             InboundMessageManager.HandleClientMessage(message, session);
             lastReceivedMessageSequence++;
         }
@@ -379,9 +430,7 @@ namespace ReturnHome.Server.Network
         {
             //Remove stored messages here that the client ack's
 
-            Console.WriteLine($"Checking for message to remove");
-
-            var removalList = cachedMessages.Keys.Where(x => x < messageSequence);
+            var removalList = cachedMessages.Keys.Where(x => x <= messageSequence);
 
             foreach (var key in removalList)
             {
@@ -432,7 +481,7 @@ namespace ReturnHome.Server.Network
 
         private void SendPacket(ServerPacket packet)
         {
-            Console.WriteLine("Sending Packet...");
+            //Console.WriteLine("Sending Packet...");
             SendPacketRaw(packet);
         }
 
@@ -518,9 +567,9 @@ namespace ReturnHome.Server.Network
                     //Reliable type message
                     while (true)
                     {
-                        
+
                         //Do some math to break the message down
-                        for ( int i = 0; i < (Math.Ceiling((double)message.DataLength / PacketMessage.MaxMessageSize)); i++)
+                        for (int i = 0; i < (Math.Ceiling((double)message.DataLength / PacketMessage.MaxMessageSize)); i++)
                         {
                             //packetLog.DebugFormat("[{0}] Sending tail fragment", session.LoggingIdentifier);
                             ServerPacketMessage spf = message.GetNextMessage(ConnectionData.MessageSequence++);
@@ -549,7 +598,7 @@ namespace ReturnHome.Server.Network
                     List<ServerPacketMessage> messageRemoveList = new();
                     int availableSpace = ServerPacket.MaxPacketSize;
 
-                    foreach( ServerPacketMessage message in PacketMessages)
+                    foreach (ServerPacketMessage message in PacketMessages)
                     {
                         if (availableSpace >= message.Length)
                         {
@@ -579,6 +628,8 @@ namespace ReturnHome.Server.Network
         {
             isReleased = true;
 
+            //Remove from server list queue, if possible there
+            ServerListManager.RemoveSession(session);
             for (int i = 0; i < currentBundles.Length; i++)
                 currentBundles[i] = null;
 
@@ -588,6 +639,8 @@ namespace ReturnHome.Server.Network
             cachedMessages.Clear();
 
             packetQueue.Clear();
+
+
         }
     }
 }

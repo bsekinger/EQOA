@@ -15,10 +15,8 @@ namespace ReturnHome.Server.Managers
         {
             if (sessionDict.TryAdd(session.EndPoint, session))
                 return;
-                Console.WriteLine("Session added to ServerList Queue");
-
-            //else
-                Console.WriteLine("Error occured and session was not added to ServerList Queue");
+            
+            Console.WriteLine("Error occured and session was not added to ServerList Queue");
         }
 
         public static void DistributeServerList()

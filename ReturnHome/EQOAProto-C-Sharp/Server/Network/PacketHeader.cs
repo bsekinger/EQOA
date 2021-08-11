@@ -22,62 +22,62 @@ namespace ReturnHome.Server.Network
         public ushort ClientBundleAck { get; set; }
         public ushort ClientMessageAck { get; set; } 
 
-        public void Unpack(BinaryReader buffer, byte[] buffer2)
+        public void Unpack(ReadOnlyMemory<byte> buffer)
         {
-            ClientEndPoint = buffer.ReadUInt16();
-            TargetEndPoint = buffer.ReadUInt16();
-            HeaderData = (uint)buffer.Read7BitEncodedInt();
+            int offset = 0;
+            ClientEndPoint = buffer.GetLEUShort(ref offset);
+            TargetEndPoint = buffer.GetLEUShort(ref offset);
+            HeaderData = buffer.Get7BitEncodedInt(ref offset);
             BundleSize = (ushort)(HeaderData & 0x7FF);
             headerFlags = (PacketHeaderFlags)(HeaderData - BundleSize);
 
             //Verify packet has instance in header
             if (HasHeaderFlag(PacketHeaderFlags.HasInstance))
-                SessionID = buffer.ReadUInt32();
+                SessionID = buffer.GetLEUInt(ref offset);
 
             //if Client is "remote", means it is not "master" anymore and an additional pack value to read which ties into character instanceID
             if (HasHeaderFlag(PacketHeaderFlags.IsRemote))
-                InstanceID = (uint)Utility_Funcs.DoubleUnpack(buffer);
+                InstanceID = (uint)buffer.Get7BitDoubleEncodedInt(ref offset);
 
             else
                 InstanceID = 0;
 
             if (HasHeaderFlag(PacketHeaderFlags.ResetConnection))
                 //SessionID is duplicated with resetconnection header, indicates to drop session
-                if (SessionID == buffer.ReadUInt32())
+                if (SessionID == buffer.GetLEUInt(ref offset))
                 {
                     CancelSession = true;
                     return;
-
                 }
 
-
+            //Else?????
 
             //Check if it is a transfer packet
             if (!(TargetEndPoint == 0xFFFF))
                 //Not Transfer packet, Validate CRC Checksum for packet
-                CRCChecksum = buffer2[(buffer2.Length - 4)..buffer2.Length].SequenceEqual(CRC.calculateCRC(buffer2[0..(buffer2.Length - 4)].AsSpan()));
+                CRCChecksum = buffer.Slice((buffer.Length - 4), 4).Span.SequenceEqual(CRC.calculateCRC(buffer.Slice(0, buffer.Length - 4).Span));
 
             else
                 //Eventually do transfers here some how
                 return;
 
             //Read Bundle Type, needs abit of a work around....
-            bundleFlags = (PacketBundleFlags)buffer.ReadByte();
+            bundleFlags = (PacketBundleFlags)buffer.GetByte(ref offset);
 
-            ClientBundleNumber = buffer.ReadUInt16();
+            ClientBundleNumber = buffer.GetLEUShort(ref offset);
 
 
             if (HasBundleFlag(PacketBundleFlags.NewProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessMessageAndReport) ||
                 HasBundleFlag(PacketBundleFlags.ProcessReport) || HasBundleFlag(PacketBundleFlags.ProcessAll))
             {
-                ClientBundleAck = buffer.ReadUInt16();
-                ClientMessageAck = buffer.ReadUInt16();
+                ClientBundleAck = buffer.GetLEUShort(ref offset);
+                ClientMessageAck = buffer.GetLEUShort(ref offset);
                 RDPReport = true;
             }
         }
 
         public bool HasHeaderFlag(PacketHeaderFlags HeaderFlags) { return (HeaderFlags & headerFlags) == HeaderFlags; }
 
-        public bool HasBundleFlag(PacketBundleFlags BundleFlags) { return bundleFlags == BundleFlags; }
+        public bool HasBundleFlag(PacketBundleFlags BundleFlags) { return (BundleFlags & bundleFlags) == BundleFlags; }
     }
 }

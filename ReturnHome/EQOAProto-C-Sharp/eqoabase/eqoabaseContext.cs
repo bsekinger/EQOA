@@ -39,6 +39,7 @@ namespace ReturnHome.eqoabase
             }
         }
 
+        /*
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             modelBuilder.Entity<AccountInfo>(entity =>
@@ -1201,5 +1202,6 @@ namespace ReturnHome.eqoabase
         }
 
         partial void OnModelCreatingPartial(ModelBuilder modelBuilder);
+        */
     }
 }

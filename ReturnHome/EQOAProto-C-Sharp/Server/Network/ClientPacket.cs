@@ -5,23 +5,14 @@ namespace ReturnHome.Server.Network
 {
     public class ClientPacket : Packet
     {
-        public int offset = 0;
-
         public static int MaxPacketSize { get; } = 1024;
 
-        public bool Unpack(byte[] buffer, int bufferSize)
+        public bool Unpack(ReadOnlyMemory<byte> buffer, int bufferSize)
         {
             //Track memory offset as packet is processed
             try
             {
-                //Probably not needed, header length is variable...
-                //if (bufferSize < Header.HeaderSize)
-                //return false;
-
-                Data = new MemoryStream(buffer, 0, buffer.Length, false, true);
-                binaryReader = new BinaryReader(Data);
-
-                Header.Unpack(binaryReader, buffer);
+                Header.Unpack(buffer);
 
                 //Need a way to identify an additional bundle from client and to process this
 
@@ -81,7 +72,6 @@ namespace ReturnHome.Server.Network
 
                     catch (Exception)
                     {
-                        Console.WriteLine("Error Splicing Messages from packet");
                         // corrupt packet
                         return false;
                     }

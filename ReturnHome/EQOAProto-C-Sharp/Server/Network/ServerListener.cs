@@ -101,7 +101,7 @@ namespace ReturnHome.Server.Network
 
                 var packet = new ClientPacket();
 
-                if (packet.Unpack(buffer, dataSize))
+                if (packet.Unpack(new ReadOnlyMemory(buffer), dataSize))
                     NetworkManager.ProcessPacket(this, packet, ipEndpoint);
 
                 packet.ReleaseBuffer();
