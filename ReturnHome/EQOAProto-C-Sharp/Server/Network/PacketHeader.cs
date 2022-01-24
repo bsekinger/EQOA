@@ -21,7 +21,7 @@ namespace ReturnHome.Server.Network
         public bool SessionAck { get; private set; } = false;
         public ushort BundleSize { get; set; }
         public uint InstanceID { get; set; }
-        public uint SessionID { get; set; }
+        public uint SessionID { get; set; } = 0;
         public uint SessionAckID { get; private set; }
         public ushort ClientBundleNumber { get; set; }
         public ushort ClientBundleAck { get; set; }
@@ -63,11 +63,8 @@ namespace ReturnHome.Server.Network
                 }
 
             //if Client is "remote", means it is not "master" anymore and an additional pack value to read which ties into character instanceID
-            if (HasHeaderFlag(PacketHeaderFlags.IsRemote))
+            if (HasHeaderFlag(PacketHeaderFlags.ReadPacked))
                 SessionID = (uint)buffer.Get7BitDoubleEncodedInt(ref offset);
-
-            else
-                SessionID = 0;
 				
 				
 			if (HasHeaderFlag(PacketHeaderFlags.NewInstance))

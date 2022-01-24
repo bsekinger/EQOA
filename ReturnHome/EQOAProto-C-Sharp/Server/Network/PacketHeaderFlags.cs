@@ -8,6 +8,7 @@ namespace ReturnHome.Server.Network
         NewInstance             = 0x00080000,
         HasInstance             = 0x00002000,
         IsRemote                = 0x00000800,
-        ResetConnection         = 0x00010000
+        ResetConnection         = 0x00010000,
+        ReadPacked              = 0x00001000
     }
 }
